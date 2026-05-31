@@ -105,16 +105,11 @@ spec:
                 steps {
                     container('docker') {
                         script {
-
+                            def imageName = "docker.io/archcra/st31:${env.IMAGE_TAG}"   
                             sh """
-                                echo "Waiting for Docker daemon..."
-                                until docker info > /dev/null 2>&1; do
-                                    echo "Docker daemon not ready yet... sleeping 2s"
-                                    sleep 2
-                                done
-                                echo "Docker daemon is ready!"
+
                                 
-                                docker build -t ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG} .
+                                docker build -t ${imageName} -f app/Dockerfile app
                             """
                         }
                     }
