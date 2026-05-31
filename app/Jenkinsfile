@@ -1,0 +1,4 @@
+@Library('jenkins-shared-library@main') _
+
+
+runCiPipeline(configFile: '.ci-config.yaml')

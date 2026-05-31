@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: st31
+  labels:
+    app: st31
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: st31
+  template:
+    metadata:
+      labels:
+        app: st31
+    spec:
+      containers:
+      - name: app
+        image: PLACEHOLDER_IMAGE 
+        ports:
+        - containerPort: 4080
+        imagePullPolicy: Always
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 4080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 3
+          periodSeconds: 5
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
