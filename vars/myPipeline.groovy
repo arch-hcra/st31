@@ -1,4 +1,4 @@
-def call(Map config) {
+def call(Map configParams) {
     pipeline {
         agent {
             kubernetes {
@@ -16,7 +16,6 @@ spec:
     image: jenkins/inbound-agent:latest
     args: ['\$(JENKINS_SECRET)', '\$(JENKINS_NAME)']
     
-  # Контейнер с Docker-демоном (DinD)
   - name: dind
     image: docker:dind
     command: ['dockerd-entrypoint.sh']
@@ -24,7 +23,7 @@ spec:
     securityContext:
       privileged: true
       
-  # Клиент Docker
+
   - name: docker
     image: docker:latest
     command: ['cat']
@@ -35,18 +34,18 @@ spec:
       - name: DOCKER_TLS_CERTDIR
         value: ""
 
-  # Python для тестов
+
   - name: python
     image: python:3.9
     command: ['cat']
     tty: true
 
-  # Tools для деплоя (kubectl + yq)
+ 
   - name: tools
     image: alpine/kubectl:latest
     command: ['cat']
     tty: true
-    # Устанавливаем yq при старте контейнера
+
     command:
     - /bin/sh
     - -c
@@ -58,32 +57,41 @@ spec:
             }
         }
         
-        parameters {
-            string(name: 'DOCKER_IMAGE_NAME', defaultValue: 'st31', description: 'Имя Docker образа')
-            string(name: 'DOCKER_REGISTRY', defaultValue: 'docker.io/archcra', description: 'Docker Registry')
-        }
+
 
         environment {
-
             IMAGE_TAG_BASE = "${env.BUILD_NUMBER}"
-            FULL_IMAGE_NAME = "${params.DOCKER_REGISTRY}/${params.DOCKER_IMAGE_NAME}"
 
+            FULL_IMAGE_NAME = "" 
+            REPO_URL = ""
+            TARGET_PATH = ""
+            
             IMAGE_TAG = "" 
+            GIT_CREDENTIALS_ID = 'jenkins_1' 
         }
 
         stages {
             
-            stage('Checkout & Tag') {
+            stage('Checkout & Load Config') {
                 steps {
                     container('jnlp') {
                         checkout scm
                         script {
 
-                            def shortHash = gitCommitShortHash()
-                            env.IMAGE_TAG = "${env.IMAGE_TAG_BASE}-${shortHash}"
+                            def cfg = readYaml file: configParams.configFile
+                        
+                            env.FULL_IMAGE_NAME = cfg.dockerImage
+                            env.REPO_URL = cfg.infraRepoUrl
+                            env.TARGET_PATH = cfg.infraRepoTargetPath
                             
-                            echo "Current branch: ${env.BRANCH_NAME}"
-                            echo "Is PR? ${env.CHANGE_ID != null}"
+  
+                            def shortHash = gitCommitShortHash()
+                            env.IMAGE_TAG = "${env.BRANCH_NAME}-${env.BUILD_NUMBER}-${shortHash}"
+                            
+                            echo "=== Config Loaded ==="
+                            echo "App Name: ${cfg.appName}"
+                            echo "Docker Image: ${env.FULL_IMAGE_NAME}"
+                            echo "Target Path: ${env.TARGET_PATH}"
                             echo "Final Image Tag: ${env.IMAGE_TAG}"
                         }
                     }
@@ -100,7 +108,6 @@ spec:
                                 pip install -r requirements.txt
                                 python3 -m unittest test_app.py
                             '''
-                            echo "Running unit tests... OK"
                         }
                     }
                 }
@@ -110,8 +117,7 @@ spec:
                 steps {
                     container('docker') {
                         script {
-                            echo "Building Docker image: ${FULL_IMAGE_NAME}:${IMAGE_TAG}"
-                            sh "docker build -t ${FULL_IMAGE_NAME}:${IMAGE_TAG} ."
+                            sh "docker build -t ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG} ."
                         }
                     }
                 }
@@ -121,48 +127,49 @@ spec:
                 steps {
                     container('docker') {
                         script {
-                            echo "Pushing Docker image..."
                             withCredentials([usernamePassword(credentialsId: 'docker_token_1', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                                 sh "echo ${DOCKER_PASS} | docker login -u ${DOCKER_USER} --password-stdin"
+                                sh "docker push ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}"
                                 
-                                sh "docker push ${FULL_IMAGE_NAME}:${IMAGE_TAG}"
-                                
-                                sh "docker tag ${FULL_IMAGE_NAME}:${IMAGE_TAG} ${FULL_IMAGE_NAME}:latest"
-                                sh "docker push ${FULL_IMAGE_NAME}:latest"
+                               
+                                if (env.BRANCH_NAME == 'main') {
+                                    sh "docker tag ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG} ${env.FULL_IMAGE_NAME}:latest"
+                                    sh "docker push ${env.FULL_IMAGE_NAME}:latest"
+                                }
                             }
-                            echo "Image pushed successfully!"
                         }
                     }
                 }
             }
 
-            stage('Deploy to Dev') {
-                when {
-                    branch 'main'
-                }
+  
+            stage('Update Manifests & Push to Git') {
                 steps {
                     script {
-                        echo "Merged to main! Starting deployment to dev namespace..."
+                        if (env.BRANCH_NAME != 'developer' && env.BRANCH_NAME != 'main') {
+                            echo "Branch ${env.BRANCH_NAME} is not configured for auto-deploy update. Skipping."
+                            return 
+                        }
+
+                        echo "Updating manifest in ${env.TARGET_PATH}/kustomization.yaml with tag ${env.IMAGE_TAG}"
                         
-                        dir('infra-repo') {
-
-                            git url: 'https://github.com/arch-hcra/st31.git', branch: 'main'
+                        container('tools') {
+                            sh "yq e '.images[0].newTag = \"${env.IMAGE_TAG}\"' -i ${env.TARGET_PATH}/kustomization.yaml"
                             
+                            sh """
+                                git config user.email "jenkins@ci.local"
+                                git config user.name "Jenkins CI"
+                            """
+                            
+                            withCredentials([usernamePassword(credentialsId: "${GIT_CREDENTIALS_ID}", usernameVariable: 'GIT_USER', passwordVariable: 'GIT_TOKEN')]) {
 
-                            container('tools') {
-                                sh "yq --version"
                                 sh """
-                                    yq e '.images[0].newTag = "${IMAGE_TAG}"' -i overlays/dev/kustomization.yaml
-                                    echo "Updated image tag in kustomization to ${IMAGE_TAG}"
+                                    AUTH_URL=\$(echo ${env.REPO_URL} | sed -e 's|https://||')
+                                    git add ${env.TARGET_PATH}/kustomization.yaml
+                                    git commit -m "Update image tag to ${env.IMAGE_TAG} in ${env.TARGET_PATH} [skip ci]"
+                                    git push https://${GIT_USER}:\${GIT_TOKEN}@\${AUTH_URL} HEAD:${env.BRANCH_NAME}
                                 """
-                                
-
-                                withCredentials([file(credentialsId: 'kubeconfig-dev', variable: 'KUBECONFIG')]) {
-                                    sh "kubectl apply -k overlays/dev/"
-                                }
                             }
-                            
-                            echo "Deployment to dev successful!"
                         }
                     }
                 }
