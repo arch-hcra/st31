@@ -16,7 +16,6 @@ spec:
     image: jenkins/inbound-agent:latest
     args: ['\$(JENKINS_SECRET)', '\$(JENKINS_NAME)']
     
-  # Контейнер с Docker-демоном (DinD)
   - name: dind
     image: docker:dind
     command: ['dockerd-entrypoint.sh']
@@ -24,7 +23,7 @@ spec:
     securityContext:
       privileged: true
       
-  # Клиент Docker
+
   - name: docker
     image: docker:latest
     command: ['cat']
@@ -35,18 +34,18 @@ spec:
       - name: DOCKER_TLS_CERTDIR
         value: ""
 
-  # Python для тестов
+
   - name: python
     image: python:3.9
     command: ['cat']
     tty: true
 
-  # Tools для деплоя (kubectl + yq)
+ 
   - name: tools
     image: alpine/kubectl:latest
     command: ['cat']
     tty: true
-    # Устанавливаем yq при старте контейнера
+
     command:
     - /bin/sh
     - -c
@@ -64,11 +63,10 @@ spec:
         }
 
         environment {
-
             IMAGE_TAG_BASE = "${env.BUILD_NUMBER}"
             FULL_IMAGE_NAME = "${params.DOCKER_REGISTRY}/${params.DOCKER_IMAGE_NAME}"
-
             IMAGE_TAG = "" 
+            GIT_CREDENTIALS_ID = 'jenkins_1' 
         }
 
         stages {
@@ -78,12 +76,10 @@ spec:
                     container('jnlp') {
                         checkout scm
                         script {
-
                             def shortHash = gitCommitShortHash()
-                            env.IMAGE_TAG = "${env.IMAGE_TAG_BASE}-${shortHash}"
+                            env.IMAGE_TAG = "${env.BRANCH_NAME}-${env.BUILD_NUMBER}-${shortHash}"
                             
                             echo "Current branch: ${env.BRANCH_NAME}"
-                            echo "Is PR? ${env.CHANGE_ID != null}"
                             echo "Final Image Tag: ${env.IMAGE_TAG}"
                         }
                     }
@@ -100,7 +96,6 @@ spec:
                                 pip install -r requirements.txt
                                 python3 -m unittest test_app.py
                             '''
-                            echo "Running unit tests... OK"
                         }
                     }
                 }
@@ -110,7 +105,6 @@ spec:
                 steps {
                     container('docker') {
                         script {
-                            echo "Building Docker image: ${FULL_IMAGE_NAME}:${IMAGE_TAG}"
                             sh "docker build -t ${FULL_IMAGE_NAME}:${IMAGE_TAG} ."
                         }
                     }
@@ -121,48 +115,56 @@ spec:
                 steps {
                     container('docker') {
                         script {
-                            echo "Pushing Docker image..."
                             withCredentials([usernamePassword(credentialsId: 'docker_token_1', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                                 sh "echo ${DOCKER_PASS} | docker login -u ${DOCKER_USER} --password-stdin"
-                                
                                 sh "docker push ${FULL_IMAGE_NAME}:${IMAGE_TAG}"
                                 
-                                sh "docker tag ${FULL_IMAGE_NAME}:${IMAGE_TAG} ${FULL_IMAGE_NAME}:latest"
-                                sh "docker push ${FULL_IMAGE_NAME}:latest"
+                               
+                                if (env.BRANCH_NAME == 'main') {
+                                    sh "docker tag ${FULL_IMAGE_NAME}:${IMAGE_TAG} ${FULL_IMAGE_NAME}:latest"
+                                    sh "docker push ${FULL_IMAGE_NAME}:latest"
+                                }
                             }
-                            echo "Image pushed successfully!"
                         }
                     }
                 }
             }
 
-            stage('Deploy to Dev') {
-                when {
-                    branch 'main'
-                }
+  
+            stage('Update Manifests & Push to Git') {
                 steps {
                     script {
-                        echo "Merged to main! Starting deployment to dev namespace..."
+
+                        def kustomizePath = ''
+                        if (env.BRANCH_NAME == 'developer') {
+                            kustomizePath = 'overlays/dev'
+                        } else if (env.BRANCH_NAME == 'main') {
+                            kustomizePath = 'overlays/dev'
+                        } else {
+                            echo "Branch ${env.BRANCH_NAME} is not configured for auto-deploy update. Skipping."
+                            return 
+                        }
+
+                        echo "Updating manifest in ${kustomizePath}/kustomization.yaml with tag ${IMAGE_TAG}"
                         
-                        dir('infra-repo') {
-
-                            git url: 'https://github.com/arch-hcra/st31.git', branch: 'main'
+                        container('tools') {
+                          
+                            sh "yq e '.images[0].newTag = \"${IMAGE_TAG}\"' -i ${kustomizePath}/kustomization.yaml"
                             
-
-                            container('tools') {
-                                sh "yq --version"
+                           
+                            sh """
+                                git config user.email "jenkins@ci.local"
+                                git config user.name "Jenkins CI"
+                            """
+                            
+                           
+                            withCredentials([usernamePassword(credentialsId: "${GIT_CREDENTIALS_ID}", usernameVariable: 'GIT_USER', passwordVariable: 'GIT_TOKEN')]) {
                                 sh """
-                                    yq e '.images[0].newTag = "${IMAGE_TAG}"' -i overlays/dev/kustomization.yaml
-                                    echo "Updated image tag in kustomization to ${IMAGE_TAG}"
+                                    git add ${kustomizePath}/kustomization.yaml
+                                    git commit -m "Update image tag to ${IMAGE_TAG} in ${kustomizePath} [skip ci]"
+                                    git push https://${GIT_USER}:${GIT_TOKEN}@github.com/arch-hcra/st31.git HEAD:${env.BRANCH_NAME}
                                 """
-                                
-
-                                withCredentials([file(credentialsId: 'kubeconfig-dev', variable: 'KUBECONFIG')]) {
-                                    sh "kubectl apply -k overlays/dev/"
-                                }
                             }
-                            
-                            echo "Deployment to dev successful!"
                         }
                     }
                 }
