@@ -10,7 +10,7 @@ metadata:
   labels:
     jenkins: agent
 spec:
-  serviceAccountName: jenkins
+  serviceAccountName: default
   containers:
   - name: jnlp
     image: jenkins/inbound-agent:latest
