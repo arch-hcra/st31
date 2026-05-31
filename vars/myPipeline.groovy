@@ -106,7 +106,7 @@ spec:
                                 python3 -m venv venv
                                 . venv/bin/activate
                                 pip install -r app/requirements.txt
-                                python3 -m unittest app/test/test_app.py
+                                pytest app/test/test_app.py
                             '''
                         }
                     }
