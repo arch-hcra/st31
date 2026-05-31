@@ -30,9 +30,7 @@ spec:
     tty: true
     env:
       - name: DOCKER_HOST
-        value: tcp://localhost:2375
-      - name: DOCKER_TLS_CERTDIR
-        value: ""
+        value: tcp://dind.jenkins.svc.cluster.local:2375
 
 
   - name: python
