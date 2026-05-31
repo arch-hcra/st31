@@ -1,4 +1,4 @@
-def call(Map config) {
+def call(Map configParams) {
     pipeline {
         agent {
             kubernetes {
@@ -57,29 +57,41 @@ spec:
             }
         }
         
-        parameters {
-            string(name: 'DOCKER_IMAGE_NAME', defaultValue: 'st31', description: 'Имя Docker образа')
-            string(name: 'DOCKER_REGISTRY', defaultValue: 'docker.io/archcra', description: 'Docker Registry')
-        }
+
 
         environment {
             IMAGE_TAG_BASE = "${env.BUILD_NUMBER}"
-            FULL_IMAGE_NAME = "${params.DOCKER_REGISTRY}/${params.DOCKER_IMAGE_NAME}"
+
+            FULL_IMAGE_NAME = "" 
+            REPO_URL = ""
+            TARGET_PATH = ""
+            
             IMAGE_TAG = "" 
             GIT_CREDENTIALS_ID = 'jenkins_1' 
         }
 
         stages {
             
-            stage('Checkout & Tag') {
+            stage('Checkout & Load Config') {
                 steps {
                     container('jnlp') {
                         checkout scm
                         script {
+
+                            def cfg = readYaml file: configParams.configFile
+                        
+                            env.FULL_IMAGE_NAME = cfg.dockerImage
+                            env.REPO_URL = cfg.infraRepoUrl
+                            env.TARGET_PATH = cfg.infraRepoTargetPath
+                            
+  
                             def shortHash = gitCommitShortHash()
                             env.IMAGE_TAG = "${env.BRANCH_NAME}-${env.BUILD_NUMBER}-${shortHash}"
                             
-                            echo "Current branch: ${env.BRANCH_NAME}"
+                            echo "=== Config Loaded ==="
+                            echo "App Name: ${cfg.appName}"
+                            echo "Docker Image: ${env.FULL_IMAGE_NAME}"
+                            echo "Target Path: ${env.TARGET_PATH}"
                             echo "Final Image Tag: ${env.IMAGE_TAG}"
                         }
                     }
@@ -105,7 +117,7 @@ spec:
                 steps {
                     container('docker') {
                         script {
-                            sh "docker build -t ${FULL_IMAGE_NAME}:${IMAGE_TAG} ."
+                            sh "docker build -t ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG} ."
                         }
                     }
                 }
@@ -117,12 +129,12 @@ spec:
                         script {
                             withCredentials([usernamePassword(credentialsId: 'docker_token_1', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                                 sh "echo ${DOCKER_PASS} | docker login -u ${DOCKER_USER} --password-stdin"
-                                sh "docker push ${FULL_IMAGE_NAME}:${IMAGE_TAG}"
+                                sh "docker push ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}"
                                 
                                
                                 if (env.BRANCH_NAME == 'main') {
-                                    sh "docker tag ${FULL_IMAGE_NAME}:${IMAGE_TAG} ${FULL_IMAGE_NAME}:latest"
-                                    sh "docker push ${FULL_IMAGE_NAME}:latest"
+                                    sh "docker tag ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG} ${env.FULL_IMAGE_NAME}:latest"
+                                    sh "docker push ${env.FULL_IMAGE_NAME}:latest"
                                 }
                             }
                         }
@@ -134,35 +146,28 @@ spec:
             stage('Update Manifests & Push to Git') {
                 steps {
                     script {
-
-                        def kustomizePath = ''
-                        if (env.BRANCH_NAME == 'developer') {
-                            kustomizePath = 'overlays/dev'
-                        } else if (env.BRANCH_NAME == 'main') {
-                            kustomizePath = 'overlays/dev'
-                        } else {
+                        if (env.BRANCH_NAME != 'developer' && env.BRANCH_NAME != 'main') {
                             echo "Branch ${env.BRANCH_NAME} is not configured for auto-deploy update. Skipping."
                             return 
                         }
 
-                        echo "Updating manifest in ${kustomizePath}/kustomization.yaml with tag ${IMAGE_TAG}"
+                        echo "Updating manifest in ${env.TARGET_PATH}/kustomization.yaml with tag ${env.IMAGE_TAG}"
                         
                         container('tools') {
-                          
-                            sh "yq e '.images[0].newTag = \"${IMAGE_TAG}\"' -i ${kustomizePath}/kustomization.yaml"
+                            sh "yq e '.images[0].newTag = \"${env.IMAGE_TAG}\"' -i ${env.TARGET_PATH}/kustomization.yaml"
                             
-                           
                             sh """
                                 git config user.email "jenkins@ci.local"
                                 git config user.name "Jenkins CI"
                             """
                             
-                           
                             withCredentials([usernamePassword(credentialsId: "${GIT_CREDENTIALS_ID}", usernameVariable: 'GIT_USER', passwordVariable: 'GIT_TOKEN')]) {
+
                                 sh """
-                                    git add ${kustomizePath}/kustomization.yaml
-                                    git commit -m "Update image tag to ${IMAGE_TAG} in ${kustomizePath} [skip ci]"
-                                    git push https://${GIT_USER}:${GIT_TOKEN}@github.com/arch-hcra/st31.git HEAD:${env.BRANCH_NAME}
+                                    AUTH_URL=\$(echo ${env.REPO_URL} | sed -e 's|https://||')
+                                    git add ${env.TARGET_PATH}/kustomization.yaml
+                                    git commit -m "Update image tag to ${env.IMAGE_TAG} in ${env.TARGET_PATH} [skip ci]"
+                                    git push https://${GIT_USER}:\${GIT_TOKEN}@\${AUTH_URL} HEAD:${env.BRANCH_NAME}
                                 """
                             }
                         }
