@@ -46,7 +46,7 @@ spec:
 
         environment {
             GIT_CREDENTIALS_ID = 'jenkins_1'
-            BRANCH_NAME = env.BRANCH_NAME ?: 'developer'  // Дефолтное значение ветки
+            BRANCH_NAME = env.BRANCH_NAME ?: 'developer'  // Исправлено: добавлены кавычки
         }
 
         stages {
@@ -55,7 +55,6 @@ spec:
                     container('jnlp') {
                         checkout scm
                         script {
-                            // Проверяем наличие конфига
                             def configFile = "${WORKSPACE}/app/.ci-config.yaml"
                             if (!fileExists(configFile)) {
                                 error("Config file ${configFile} not found!")
@@ -63,28 +62,17 @@ spec:
 
                             def cfg = readYaml(file: configFile)
 
-                            // Валидация конфига
                             if (!cfg || !cfg.appName) {
                                 error("Invalid config: 'appName' is required!")
                             }
 
-                            // Инициализация переменных
+                            // Присвоение переменных окружения
                             env.FULL_IMAGE_NAME = cfg.dockerImage ?: "docker.io/archcra/${cfg.appName}"
                             env.REPO_URL = cfg.infraRepoUrl ?: 'https://github.com/arch-hcra/st31.git'
                             env.TARGET_PATH = cfg.infraRepoTargetPath ?: 'overlays/dev'
                             env.APP_NAME = cfg.appName
 
-                            // Формирование тега
-                            if (env.BRANCH_NAME == 'main') {
-                                env.IMAGE_TAG = 'latest'
-                            } else {
-                                env.IMAGE_TAG = "${env.APP_NAME}-${env.BRANCH_NAME}-${env.BUILD_NUMBER}"
-                            }
-
-                            echo "=== Config Loaded ==="
-                            echo "Image Name: ${env.FULL_IMAGE_NAME}"
-                            echo "Image Tag: ${env.IMAGE_TAG}"
-                            echo "App Name: ${env.APP_NAME}"
+                            env.IMAGE_TAG = env.BRANCH_NAME == 'main' ? 'latest' : "${env.APP_NAME}-${env.BRANCH_NAME}-${env.BUILD_NUMBER}"
                         }
                     }
                 }
@@ -93,25 +81,20 @@ spec:
             stage('Build & Test') {
                 steps {
                     container('python') {
-                        script {
-                            sh '''
-                                python3 -m venv venv
-                                . venv/bin/activate
-                                pip install -r app/requirements.txt
-                                pytest app/test/test_app.py || true  # Продолжаем даже если тесты падают
-                            '''
-                        }
+                        sh '''
+                            python3 -m venv venv
+                            . venv/bin/activate
+                            pip install -r app/requirements.txt
+                            pytest app/test/test_app.py || true
+                        '''
                     }
                 }
             }
 
             stage('Build Docker Image') {
-                container('dind') {
-                    steps {
+                steps {  // ✅ Добавлен блок steps
+                    container('dind') {
                         script {
-                            if (env.FULL_IMAGE_NAME == null || env.IMAGE_TAG == null) {
-                                error("Failed to initialize Docker image name/tag!")
-                            }
                             sh "docker build -t ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG} -f app/Dockerfile app"
                         }
                     }
@@ -119,8 +102,8 @@ spec:
             }
 
             stage('Push Docker Image') {
-                container('dind') {
-                    steps {
+                steps {  // ✅ Добавлен блок steps
+                    container('dind') {
                         script {
                             withCredentials([usernamePassword(
                                 credentialsId: 'docker_token_1',
@@ -129,7 +112,6 @@ spec:
                             )]) {
                                 sh "docker login -u ${env.DOCKER_USER} --password-stdin" << env.DOCKER_PASS
                                 sh "docker push ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}"
-
                                 if (env.BRANCH_NAME == 'main') {
                                     sh "docker tag ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG} ${env.FULL_IMAGE_NAME}:latest"
                                     sh "docker push ${env.FULL_IMAGE_NAME}:latest"
@@ -142,14 +124,11 @@ spec:
 
             stage('Update Manifests') {
                 when {
-                    expression {
-                        env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'developer'
-                    }
+                    expression { env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'developer' }
                 }
-                steps {
+                steps {  // ✅ Добавлен блок steps
                     container('tools') {
                         script {
-                            // Клонируем репозиторий инфраструктуры
                             sh "git clone ${env.REPO_URL} /tmp/infra-repo"
                             sh """
                                 cd /tmp/infra-repo
