@@ -101,6 +101,25 @@ spec:
                 }
             }
 
+
+            stage('Init Variables') {
+                steps {
+                    script {
+                    // 1. Читаем конфигурацию из YAML
+                        def config = readYaml file: 'app/.ci-config.yaml'
+                    
+                    // 2. Заполняем переменную FULL_IMAGE_NAME значением из YAML (ключ dockerImage)
+                        env.FULL_IMAGE_NAME = config.dockerImage
+                    
+                    // 3. Определяем тег. Если BUILD_NUMBER нет, используем 'latest'
+                        env.IMAGE_TAG = env.BUILD_NUMBER ?: 'latest'
+                    
+                    // Для отладки (можно убрать потом)
+                        echo "Image Name: ${env.FULL_IMAGE_NAME}"
+                        echo "Image Tag: ${env.IMAGE_TAG}"
+                    }
+                }
+            }
             stage('Build Docker Image') {
                 steps {
                     container('docker') {
