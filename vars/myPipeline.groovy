@@ -105,10 +105,8 @@ spec:
                 steps {
                     container('docker') {
                         script {
-                            def imageName = "docker.io/archcra/st31:${env.IMAGE_TAG}"   
+                            def imageName = "${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}"   
                             sh """
-
-                                
                                 docker build -t ${imageName} -f app/Dockerfile app
                             """
                         }
