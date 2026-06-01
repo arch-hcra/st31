@@ -136,38 +136,37 @@ spec:
                 }
             }
 
-            stage('Update Manifests') {
-                when {
-                    expression { env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'developer' }
-                }
-                steps {
-                    container('tools') {
-                        script {
-                            // Используем креды для git clone
-                            withCredentials([usernamePassword(
-                                credentialsId: env.GIT_CREDENTIALS_ID,
-                                usernameVariable: 'GIT_USER',
-                                passwordVariable: 'GIT_PASS'
-                            )]) {
-                                sh """
-                                    git clone https://${GIT_USER}:${GIT_PASS}@github.com/arch-hcra/st31.git /tmp/infra-repo
-                                    cd /tmp/infra-repo
-                                    git checkout ${env.BRANCH_NAME}
-                                    
-                                    yq eval '.images[0].newTag = "${env.IMAGE_TAG}"' ${env.TARGET_PATH}/kustomization.yaml -i
+        stage('Update Manifests') {
+            when {
+                expression { env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'developer' }
+            }
+            steps {
+                container('tools') {
+                    script {
+                        withCredentials([string(
+                            credentialsId: 'jenkins_1', 
+                            variable: 'GIT_TOKEN'
+                        )]) {
+                            sh """
+                                git clone https://${GIT_TOKEN}@github.com/arch-hcra/st31.git /tmp/infra-repo
+                                cd /tmp/infra-repo
+                                git checkout ${env.BRANCH_NAME}
+                                
+                                yq eval '.images[0].newTag = "${env.IMAGE_TAG}"' ${env.TARGET_PATH}/kustomization.yaml -i
 
-                                    git config --global user.email "jenkins@ci.local"
-                                    git config --global user.name "Jenkins CI"
+                                git config --global user.email "jenkins@ci.local"
+                                git config --global user.name "Jenkins CI"
 
-                                    git add ${env.TARGET_PATH}/kustomization.yaml
-                                    git commit -m "chore: update image tag to ${env.IMAGE_TAG} [skip ci]"
-                                    git push https://${GIT_USER}:${GIT_PASS}@github.com/arch-hcra/st31.git HEAD:${env.BRANCH_NAME}
-                                """
-                            }
+                                git add ${env.TARGET_PATH}/kustomization.yaml
+                                git commit -m "chore: update image tag to ${env.IMAGE_TAG} [skip ci]"
+                                git push https://${GIT_TOKEN}@github.com/arch-hcra/st31.git HEAD:${env.BRANCH_NAME}
+                            """
                         }
                     }
                 }
             }
+}
+
         }
     }
 }
