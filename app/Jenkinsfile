@@ -1,6 +1,8 @@
 pipeline {
     agent {
         kubernetes {
+            namespace "jenkins"  // <-- Добавляем обязательные параметры
+            id "pod"            // <-- Идентификатор пода
             yaml """
 apiVersion: v1
 kind: Pod
@@ -47,7 +49,6 @@ spec:
       emptyDir: {}
   restartPolicy: Never
 """
-            id: 'pod'
         }
     }
 
