@@ -46,7 +46,7 @@ spec:
 
         environment {
             GIT_CREDENTIALS_ID = 'jenkins_1'
-            BRANCH_NAME = env.BRANCH_NAME ?: 'developer'  // Исправлено: добавлены кавычки
+            BRANCH_NAME = env.BRANCH_NAME ?: 'developer'
         }
 
         stages {
