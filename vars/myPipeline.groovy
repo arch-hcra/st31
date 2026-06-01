@@ -46,8 +46,11 @@ spec:
 
         environment {
             GIT_CREDENTIALS_ID = 'jenkins_1'
-            BRANCH_NAME = env.BRANCH_NAME ?: 'developer'
         }
+
+        script {
+            env.BRANCH_NAME = env.BRANCH_NAME ?: 'developer'  // ✅ Работает в скриптовом контексте
+}
 
         stages {
             stage('Checkout & Load Config') {
