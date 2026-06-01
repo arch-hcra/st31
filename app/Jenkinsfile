@@ -16,8 +16,6 @@ spec:
       command: ['dockerd-entrypoint.sh', '--tls=false']
       securityContext:
         privileged: true
-        seccompProfile:
-          type: RuntimeDefault
       volumeMounts:
         - name: docker-sock
           mountPath: /var/run/docker.sock
@@ -53,20 +51,17 @@ spec:
         }
     }
 
-environment {
-  
-    DOCKERHUB_CREDENTIALS_ID = 'docker_token_1'
-    DOCKERHUB_REPO           = 'docker.io/archcra/st31'
-    APP_NAME                 = 'st31'
-    INFRA_PATH               = 'app-infra'  
-    BASE_OVERLAYS_PATH       = 'overlays'   
-    KUSTOMIZE_BASE_DIR       = 'base'       
-
-  
-    ENVIRONMENT              = '' 
-    IMAGE_TAG                = ''
-    TARGET_OVERLAY           = ''
-}
+    environment {
+        DOCKERHUB_CREDENTIALS_ID = 'docker_token_1'
+        DOCKERHUB_REPO           = 'docker.io/archcra/st31'
+        APP_NAME                 = 'st31'
+        INFRA_PATH               = 'app-infra'
+        BASE_OVERLAYS_PATH       = 'overlays'
+        KUSTOMIZE_BASE_DIR       = 'base'
+        ENVIRONMENT              = ''
+        IMAGE_TAG                = ''
+        TARGET_OVERLAY           = ''
+    }
 
     stages {
         stage('Checkout & Load Config') {
@@ -75,27 +70,20 @@ environment {
                     checkout scm
 
                     script {
-
                         if (!fileExists('app/.ci-config.yaml')) {
                             error('Ошибка: файл app/.ci-config.yaml не найден!')
                         }
 
-  
                         def config = readYaml file: 'app/.ci-config.yaml'
 
-
-                        env.ENVIRONMENT      = config.environment ?: 'developer'  
-                        env.IMAGE_TAG        = config.imageTag                 
-                        env.TARGET_OVERLAY   = "${env.BASE_OVERLAYS_PATH}/${config.environment}"
+                        env.ENVIRONMENT      = config.environment ?: 'developer'
+                        env.IMAGE_TAG        = config.imageTag ?: 'latest'
+                        env.TARGET_OVERLAY   = "${env.BASE_OVERLAYS_PATH}/${config.environment ?: env.ENVIRONMENT}"
                         env.KUSTOMIZE_FILE   = "${env.INFRA_PATH}/${env.KUSTOMIZE_BASE_DIR}/kustomization.yaml"
-
 
                         env.BRANCH_NAME      = sh(script: 'git rev-parse --abbrev-ref HEAD', returnStdout: true).trim()
                         env.COMMIT_SHA       = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
-
-
                         env.FULL_IMAGE_NAME  = "${env.DOCKERHUB_REPO}:${env.BRANCH_NAME == 'main' ? env.COMMIT_SHA : "${env.BRANCH_NAME}-${env.COMMIT_SHA}"}"
-
 
                         if (!fileExists(env.KUSTOMIZE_FILE)) {
                             error("Ошибка: файл kustomization.yaml не найден по пути: ${env.KUSTOMIZE_FILE}")
@@ -104,7 +92,7 @@ environment {
                 }
             }
         }
-    }
+
         stage('Install Dependencies') {
             steps {
                 container('jnlp') {
@@ -157,18 +145,16 @@ environment {
             }
             steps {
                 container('yq-tools') {
-
+                    script {
                         if (!fileExists(env.KUSTOMIZE_FILE)) {
                             error("Kustomization file not found at: ${env.KUSTOMIZE_FILE}")
                         }
-
 
                         sh """
                         cd ${env.INFRA_PATH}
                         yq e '.images[0].newTag = "${env.IMAGE_TAG}"' -i ${env.TARGET_OVERLAY}/kustomization.yaml
                         echo "Updated kustomization.yaml with new image tag: ${env.IMAGE_TAG}"
                         """
-
 
                         withCredentials([usernamePassword(
                             credentialsId: 'github_token_1',
@@ -188,7 +174,7 @@ environment {
                 }
             }
         }
-    
+    }
 
     post {
         always {
@@ -197,4 +183,4 @@ environment {
             }
         }
     }
-
+}
