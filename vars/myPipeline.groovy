@@ -92,7 +92,7 @@ spec:
                         sh '''
                             python3 -m venv venv
                             . venv/bin/activate
-                            pip install -r app/requirements.txt
+                            pip install --default-timeout=100 -r app/requirements.txt -i https://mirror.yandex.ru/mirrors/pypi/simple/ --trusted-host mirror.yandex.ru
                             pytest app/test/test_app.py || true
                         '''
                     }
