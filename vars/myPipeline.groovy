@@ -92,7 +92,7 @@ spec:
                 steps {
                     container('dind') {
                         script {
-=
+
                             sh "docker build -t ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG} -f app/Dockerfile app"
                         }
                     }
