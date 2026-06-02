@@ -72,7 +72,7 @@ spec:
                             // 4. Присвоение переменных
                             env.FULL_IMAGE_NAME = cfg.dockerImage ?: "docker.io/archcra/${cfg.appName}"
                             env.REPO_URL = cfg.infraRepoUrl ?: 'https://github.com/arch-hcra/st31.git'
-                            env.TARGET_PATH = cfg.infraRepoTargetPath ?: 'overlays/dev'
+                            env.TARGET_PATH = cfg.infraRepoTargetPath ?: 'app-infra/overlays/dev'
                             env.APP_NAME = cfg.appName
 
                             // Формируем тег
