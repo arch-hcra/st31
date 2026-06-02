@@ -22,7 +22,6 @@ spec:
     args: ['--tls=false']
     securityContext:
       privileged: true
-    # Убрали DOCKER_HOST, чтобы docker использовал локальный сокет по умолчанию
 
   - name: python
     image: python:3.9
@@ -51,13 +50,12 @@ spec:
                 steps {
                     container('jnlp') {
                         script {
-                            // 1. Checkout кода
+
                             checkout scm
 
-                            // 2. ИСПРАВЛЕНИЕ: Логика BRANCH_NAME перенесена сюда
                             env.BRANCH_NAME = env.BRANCH_NAME ?: 'developer'
 
-                            // 3. Чтение конфига
+
                             def configFile = "${WORKSPACE}/app/.ci-config.yaml"
                             if (!fileExists(configFile)) {
                                 error("Config file ${configFile} not found!")
@@ -69,13 +67,13 @@ spec:
                                 error("Invalid config: 'appName' is required!")
                             }
 
-                            // 4. Присвоение переменных
+  
                             env.FULL_IMAGE_NAME = cfg.dockerImage ?: "docker.io/archcra/${cfg.appName}"
                             env.REPO_URL = cfg.infraRepoUrl ?: 'https://github.com/arch-hcra/st31.git'
                             env.TARGET_PATH = cfg.infraRepoTargetPath ?: 'app-infra/overlays/dev'
                             env.APP_NAME = cfg.appName
 
-                            // Формируем тег
+
                             env.IMAGE_TAG = env.BRANCH_NAME == 'main' ? 'latest' : "${env.APP_NAME}-${env.BRANCH_NAME}-${env.BUILD_NUMBER}"
                             
                             echo "=== CONFIG LOADED ==="
@@ -93,7 +91,7 @@ spec:
                             python3 -m venv venv
                             . venv/bin/activate
                             pip install --default-timeout=120 -r app/requirements.txt
-                            pytest app/test/test_app.py || true
+                            pytest app/test/test_app.py
                         '''
                     }
                 }
@@ -118,7 +116,6 @@ spec:
                                 usernameVariable: 'DOCKER_USER',
                                 passwordVariable: 'DOCKER_PASS'
                             )]) {
-                                // ИСПРАВЛЕНИЕ: Правильный синтаксис логина
                                 sh """
                                     echo \${DOCKER_PASS} | docker login -u \${DOCKER_USER} --password-stdin
                                     docker push ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}
