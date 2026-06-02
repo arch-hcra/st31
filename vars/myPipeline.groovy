@@ -135,20 +135,28 @@ spec:
                                 sh """
                                     git clone https://${GIT_TOKEN}@github.com/arch-hcra/st31.git /tmp/infra-repo
                                     cd /tmp/infra-repo
-                                    
+
+                                    git checkout ${env.BRANCH_NAME} || git checkout -b ${env.BRANCH_NAME} origin/${env.BRANCH_NAME}
+
+
                                     yq eval '.images[0].newTag = "${env.IMAGE_TAG}"' ${env.TARGET_PATH}/kustomization.yaml -i
 
                                     git config user.email "jenkins@ci.local"
                                     git config user.name "Jenkins CI"
                                     git add .
                                     git commit -m "update tag to ${env.IMAGE_TAG}"
-                                    git push https://${GIT_TOKEN}@github.com/arch-hcra/st31.git HEAD:${env.BRANCH_NAME}
+
+
+                                    git pull --rebase
+
+                                    git push
                                 """
                             }
                         }
                     }
                 }
             }
+
         }
     }
 }
