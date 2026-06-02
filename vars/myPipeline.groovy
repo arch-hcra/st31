@@ -11,32 +11,40 @@ metadata:
     jenkins: agent
 spec:
   serviceAccountName: default
+  volumes:
+  - name: workspace-volume
+    emptyDir: {}
   containers:
   - name: jnlp
     image: jenkins/inbound-agent:latest
     args: ['\$(JENKINS_SECRET)', '\$(JENKINS_NAME)']
-
+    volumeMounts:
+      - name: workspace-volume
+        mountPath: /home/jenkins/agent
   - name: dind
     image: docker:dind
     command: ['dockerd-entrypoint.sh']
     args: ['--tls=false']
     securityContext:
       privileged: true
-
+    volumeMounts:
+      # Монтируем тот же диск, что и у jnlp
+      - name: workspace-volume
+        mountPath: /home/jenkins/agent
   - name: python
     image: python:3.9
     command: ['cat']
     tty: true
-
+    volumeMounts:
+      - name: workspace-volume
+        mountPath: /home/jenkins/agent
   - name: tools
     image: alpine/kubectl:latest
-    command:
-    - /bin/sh
-    - -c
-    - |
-      apk add --no-cache curl git yq
-      cat
+    command: ['/bin/sh', '-c', 'apk add --no-cache curl git yq && cat']
     tty: true
+    volumeMounts:
+      - name: workspace-volume
+        mountPath: /home/jenkins/agent
 """
             }
         }
@@ -50,35 +58,20 @@ spec:
                 steps {
                     container('jnlp') {
                         script {
-
                             checkout scm
-
                             env.BRANCH_NAME = env.BRANCH_NAME ?: 'developer'
-
 
                             def configFile = "${WORKSPACE}/app/.ci-config.yaml"
                             if (!fileExists(configFile)) {
-                                error("Config file ${configFile} not found!")
+                                error("Config file not found!")
                             }
 
                             def cfg = readYaml(file: configFile)
-
-                            if (!cfg || !cfg.appName) {
-                                error("Invalid config: 'appName' is required!")
-                            }
-
-  
                             env.FULL_IMAGE_NAME = cfg.dockerImage ?: "docker.io/archcra/${cfg.appName}"
                             env.REPO_URL = cfg.infraRepoUrl ?: 'https://github.com/arch-hcra/st31.git'
                             env.TARGET_PATH = cfg.infraRepoTargetPath ?: 'app-infra/overlays/dev'
                             env.APP_NAME = cfg.appName
-
-
                             env.IMAGE_TAG = env.BRANCH_NAME == 'main' ? 'latest' : "${env.APP_NAME}-${env.BRANCH_NAME}-${env.BUILD_NUMBER}"
-                            
-                            echo "=== CONFIG LOADED ==="
-                            echo "Image: ${env.FULL_IMAGE_NAME}"
-                            echo "Tag: ${env.IMAGE_TAG}"
                         }
                     }
                 }
@@ -87,12 +80,10 @@ spec:
             stage('Build & Test') {
                 steps {
                     container('python') {
-                        sh '''
-                            python3 -m venv venv
-                            . venv/bin/activate
-                            pip install --default-timeout=120 -r app/requirements.txt
-                            pytest app/test/test_app.py
-                        '''
+                        script {
+                            sh "pip install -r app/requirements.txt"
+                            sh "pytest app/test/test_app.py -v"
+                        }
                     }
                 }
             }
@@ -101,6 +92,7 @@ spec:
                 steps {
                     container('dind') {
                         script {
+
                             sh "docker build -t ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG} -f app/Dockerfile app"
                         }
                     }
@@ -120,7 +112,6 @@ spec:
                                     echo \${DOCKER_PASS} | docker login -u \${DOCKER_USER} --password-stdin
                                     docker push ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}
                                 """
-                                
                                 if (env.BRANCH_NAME == 'main') {
                                     sh """
                                         docker tag ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG} ${env.FULL_IMAGE_NAME}:latest
@@ -133,36 +124,38 @@ spec:
                 }
             }
 
-        stage('Update Manifests') {
-            when {
-                expression { env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'developer' }
-            }
-            steps {
-                container('tools') {
-                    script {
-                        withCredentials([string(
-                            credentialsId: 'jenkins_1', 
-                            variable: 'GIT_TOKEN'
-                        )]) {
-                            sh """
-                                git clone https://${GIT_TOKEN}@github.com/arch-hcra/st31.git /tmp/infra-repo
-                                cd /tmp/infra-repo
-                                git checkout ${env.BRANCH_NAME}
-                                
-                                yq eval '.images[0].newTag = "${env.IMAGE_TAG}"' ${env.TARGET_PATH}/kustomization.yaml -i
+            stage('Update Manifests') {
+                when {
+                    expression { env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'developer' }
+                }
+                steps {
+                    container('tools') {
+                        script {
+                            withCredentials([string(credentialsId: 'jenkins_1', variable: 'GIT_TOKEN')]) {
+                                sh """
+                                    git clone https://${GIT_TOKEN}@github.com/arch-hcra/st31.git /tmp/infra-repo
+                                    cd /tmp/infra-repo
 
-                                git config --global user.email "jenkins@ci.local"
-                                git config --global user.name "Jenkins CI"
+                                    git checkout ${env.BRANCH_NAME} || git checkout -b ${env.BRANCH_NAME} origin/${env.BRANCH_NAME}
 
-                                git add ${env.TARGET_PATH}/kustomization.yaml
-                                git commit -m "chore: update image tag to ${env.IMAGE_TAG} [skip ci]"
-                                git push https://${GIT_TOKEN}@github.com/arch-hcra/st31.git HEAD:${env.BRANCH_NAME}
-                            """
+
+                                    yq eval '.images[0].newTag = "${env.IMAGE_TAG}"' ${env.TARGET_PATH}/kustomization.yaml -i
+
+                                    git config user.email "jenkins@ci.local"
+                                    git config user.name "Jenkins CI"
+                                    git add .
+                                    git commit -m "update tag to ${env.IMAGE_TAG}"
+
+
+                                    git pull --rebase
+
+                                    git push
+                                """
+                            }
                         }
                     }
                 }
             }
-}
 
         }
     }
