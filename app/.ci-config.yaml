@@ -1,4 +1,4 @@
 appName: "st31"
 dockerImage: "docker.io/archcra/st31"
 infraRepoUrl: "https://github.com/arch-hcra/st31.git"
-infraRepoTargetPath: "overlays/dev"
+infraRepoTargetPath: "app-infra/overlays/dev"
