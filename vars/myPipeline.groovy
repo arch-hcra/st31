@@ -1,30 +1,4 @@
 def call(Map configParams) {
-
-    def defaults = [
-        k8sAgent: [
-            jnlpImage: 'jenkins/inbound-agent:latest',
-            dindImage: 'docker:dind',
-            pythonImage: 'python:3.9',
-            toolsImage: 'alpine/kubectl:latest',
-        ],
-  
-        configDir: 'app',
-        testFile: 'test/test_app.py',
-        dockerfilePath: 'Dockerfile',
-        requirementsFile: 'requirements.txt',
-        dockerCredentialsId: 'docker_token_1',
-        gitCredentialsId: 'jenkins_1',
-        defaultBranch: 'developer',
-        mainBranch: 'main',
-        latestTag: 'latest',
-        yqPath: '/usr/bin/yq',
-    ]
-
-    def mergedConfig = [:]
-    defaults.each { key, value ->
-        mergedConfig[key] = configParams[key] ?: value
-    }
-
     pipeline {
         agent {
             kubernetes {
@@ -42,30 +16,31 @@ spec:
     emptyDir: {}
   containers:
   - name: jnlp
-    image: ${mergedConfig.jnlpImage}
+    image: jenkins/inbound-agent:latest
     args: ['\$(JENKINS_SECRET)', '\$(JENKINS_NAME)']
     volumeMounts:
       - name: workspace-volume
         mountPath: /home/jenkins/agent
   - name: dind
-    image: ${mergedConfig.dindImage}
+    image: docker:dind
     command: ['dockerd-entrypoint.sh']
     args: ['--tls=false']
     securityContext:
       privileged: true
     volumeMounts:
+      # Монтируем тот же диск, что и у jnlp
       - name: workspace-volume
         mountPath: /home/jenkins/agent
   - name: python
-    image: ${mergedConfig.pythonImage}
+    image: python:3.9
     command: ['cat']
     tty: true
     volumeMounts:
       - name: workspace-volume
         mountPath: /home/jenkins/agent
   - name: tools
-    image: ${mergedConfig.toolsImage}
-    command: ['/bin/sh', '-c', 'apk add --no-cache curl git ${mergedConfig.yqPath} && cat']
+    image: alpine/kubectl:latest
+    command: ['/bin/sh', '-c', 'apk add --no-cache curl git yq && cat']
     tty: true
     volumeMounts:
       - name: workspace-volume
@@ -74,10 +49,8 @@ spec:
             }
         }
 
-        script {
-
-            env.GIT_CREDENTIALS_ID = mergedConfig.gitCredentialsId
-            env.DOCKER_CREDENTIALS_ID = mergedConfig.dockerCredentialsId
+        environment {
+            GIT_CREDENTIALS_ID = 'jenkins_1'
         }
 
         stages {
@@ -86,11 +59,11 @@ spec:
                     container('jnlp') {
                         script {
                             checkout scm
-                            env.BRANCH_NAME = env.BRANCH_NAME ?: mergedConfig.defaultBranch
+                            env.BRANCH_NAME = env.BRANCH_NAME ?: 'developer'
 
-                            def configFile = "${WORKSPACE}/${mergedConfig.configDir}/.ci-config.yaml"
+                            def configFile = "${WORKSPACE}/app/.ci-config.yaml"
                             if (!fileExists(configFile)) {
-                                error("Config file not found at ${configFile}!")
+                                error("Config file not found!")
                             }
 
                             def cfg = readYaml(file: configFile)
@@ -98,11 +71,7 @@ spec:
                             env.REPO_URL = cfg.infraRepoUrl ?: 'https://github.com/arch-hcra/st31.git'
                             env.TARGET_PATH = cfg.infraRepoTargetPath ?: 'app-infra/overlays/dev'
                             env.APP_NAME = cfg.appName
-                            env.IMAGE_TAG = [
-                                env.BRANCH_NAME == mergedConfig.mainBranch,
-                                mergedConfig.latestTag,
-                                "${env.APP_NAME}-${env.BRANCH_NAME}-${env.BUILD_NUMBER}"
-                            ].find { it }
+                            env.IMAGE_TAG = env.BRANCH_NAME == 'main' ? 'latest' : "${env.APP_NAME}-${env.BRANCH_NAME}-${env.BUILD_NUMBER}"
                         }
                     }
                 }
@@ -112,8 +81,8 @@ spec:
                 steps {
                     container('python') {
                         script {
-                            sh "pip install -r ${mergedConfig.configDir}/${mergedConfig.requirementsFile}"
-                            sh "pytest ${mergedConfig.configDir}/${mergedConfig.testFile} -v"
+                            sh "pip install -r app/requirements.txt"
+                            sh "pytest app/test/test_app.py -v"
                         }
                     }
                 }
@@ -123,11 +92,8 @@ spec:
                 steps {
                     container('dind') {
                         script {
-                            sh """
-                                docker build -t ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG} \
-                                -f ${mergedConfig.configDir}/${mergedConfig.dockerfilePath} \
-                                ${mergedConfig.configDir}
-                            """
+
+                            sh "docker build -t ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG} -f app/Dockerfile app"
                         }
                     }
                 }
@@ -138,7 +104,7 @@ spec:
                     container('dind') {
                         script {
                             withCredentials([usernamePassword(
-                                credentialsId: mergedConfig.dockerCredentialsId,
+                                credentialsId: 'docker_token_1',
                                 usernameVariable: 'DOCKER_USER',
                                 passwordVariable: 'DOCKER_PASS'
                             )]) {
@@ -146,10 +112,10 @@ spec:
                                     echo \${DOCKER_PASS} | docker login -u \${DOCKER_USER} --password-stdin
                                     docker push ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}
                                 """
-                                if (env.BRANCH_NAME == mergedConfig.mainBranch) {
+                                if (env.BRANCH_NAME == 'main') {
                                     sh """
-                                        docker tag ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG} ${env.FULL_IMAGE_NAME}:${mergedConfig.latestTag}
-                                        docker push ${env.FULL_IMAGE_NAME}:${mergedConfig.latestTag}
+                                        docker tag ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG} ${env.FULL_IMAGE_NAME}:latest
+                                        docker push ${env.FULL_IMAGE_NAME}:latest
                                     """
                                 }
                             }
@@ -160,38 +126,35 @@ spec:
 
             stage('Update Manifests') {
                 when {
-                    expression {
-                        env.BRANCH_NAME == mergedConfig.mainBranch ||
-                        env.BRANCH_NAME == mergedConfig.defaultBranch
-                    }
+                    expression { env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'developer' }
                 }
                 steps {
                     container('tools') {
                         script {
                             withCredentials([string(
-                                credentialsId: mergedConfig.gitCredentialsId,
+                                credentialsId: 'jenkins_1', 
                                 variable: 'GIT_TOKEN'
                             )]) {
                                 sh """
-                                    git clone https://\${GIT_TOKEN}@github.com/arch-hcra/st31.git /tmp/infra-repo
+                                    git clone https://${GIT_TOKEN}@github.com/arch-hcra/st31.git /tmp/infra-repo
                                     cd /tmp/infra-repo
                                     git checkout ${env.BRANCH_NAME}
-
-                                    ${mergedConfig.yqPath} eval '.images[0].newTag = "${env.IMAGE_TAG}"' \
-                                    ${env.TARGET_PATH}/kustomization.yaml -i
+                                    
+                                    yq eval '.images[0].newTag = "${env.IMAGE_TAG}"' ${env.TARGET_PATH}/kustomization.yaml -i
 
                                     git config --global user.email "jenkins@ci.local"
                                     git config --global user.name "Jenkins CI"
 
                                     git add ${env.TARGET_PATH}/kustomization.yaml
                                     git commit -m "chore: update image tag to ${env.IMAGE_TAG} [skip ci]"
-                                    git push https://\${GIT_TOKEN}@github.com/arch-hcra/st31.git HEAD:${env.BRANCH_NAME}
+                                    git push https://${GIT_TOKEN}@github.com/arch-hcra/st31.git HEAD:${env.BRANCH_NAME}
                                 """
                             }
                         }
                     }
                 }
             }
+
         }
     }
 }
