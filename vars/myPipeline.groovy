@@ -75,7 +75,8 @@ spec:
         }
 
         environment {
-            GIT_CREDENTIALS_ID = mergedConfig.gitCredentialsId
+
+            GIT_CREDENTIALS_ID: "${mergedConfig.gitCredentialsId}"
         }
 
         stages {
