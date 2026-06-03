@@ -74,9 +74,10 @@ spec:
             }
         }
 
-        environment {
+        script {
 
-            GIT_CREDENTIALS_ID: "${mergedConfig.gitCredentialsId}"
+            env.GIT_CREDENTIALS_ID = mergedConfig.gitCredentialsId
+            env.DOCKER_CREDENTIALS_ID = mergedConfig.dockerCredentialsId
         }
 
         stages {
