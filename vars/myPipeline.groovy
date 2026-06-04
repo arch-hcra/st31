@@ -12,22 +12,24 @@ metadata:
 spec:
   serviceAccountName: default
   volumes:
-    - name: workspace-volume
-      emptyDir: {}
-    - name: ssh-key-volume  # <-- Новый том для ключа
-      secret:
-        secretName: jenkins-ssh-key
-        defaultMode: 0600
+  - name: workspace-volume
+    emptyDir: {}
   containers:
-    - name: jnlp
-      image: jenkins/inbound-agent:latest
-      args: ['\$(JENKINS_SECRET)', '\$(JENKINS_NAME)']
-      volumeMounts:
-        - name: workspace-volume
-          mountPath: /home/jenkins/agent
-        - name: ssh-key-volume  # <-- Монтируем ключ
-          mountPath: /home/jenkins/.ssh/id_rsa
-          subPath: ssh-key
+  - name: jnlp
+    image: jenkins/inbound-agent:latest
+    args: ['\$(JENKINS_SECRET)', '\$(JENKINS_NAME)']
+    volumeMounts:
+      - name: workspace-volume
+        mountPath: /home/jenkins/agent
+  - name: dind
+    image: docker:dind
+    command: ['dockerd-entrypoint.sh']
+    args: ['--tls=false']
+    securityContext:
+      privileged: true
+    volumeMounts:
+      - name: workspace-volume
+        mountPath: /home/jenkins/agent
   - name: python
     image: python:3.9
     command: ['cat']
