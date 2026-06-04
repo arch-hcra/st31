@@ -50,40 +50,40 @@ spec:
             GIT_CREDENTIALS_ID = 'jenkins_1'
         }
 
-    stage('Checkout & Load Config') {
-        steps {
-            container('jnlp') {
-                script {
-                    sh """
-                        mkdir -p ~/.ssh
-                        echo "Host github.com
-                            User git
-                            IdentityFile ~/.ssh/id_rsa
-                            IdentitiesOnly yes
-                            StrictHostKeyChecking no" > ~/.ssh/config
-                        chmod 600 ~/.ssh/config
-                    """
+            stage('Checkout & Load Config') {
+                steps {
+                    container('jnlp') {
+                        script {
+                            sh """
+                                mkdir -p ~/.ssh
+                                echo "Host github.com
+                                    User git
+                                    IdentityFile ~/.ssh/id_rsa
+                                    IdentitiesOnly yes
+                                    StrictHostKeyChecking no" > ~/.ssh/config
+                                chmod 600 ~/.ssh/config
+                            """
 
 
-                    sh "git clone ${env.REPO_URL} ${WORKSPACE}"
-                    sh "cd ${WORKSPACE} && git checkout ${env.BRANCH_NAME ?: 'developer'}"
+                            sh "git clone ${env.REPO_URL} ${WORKSPACE}"
+                            sh "cd ${WORKSPACE} && git checkout ${env.BRANCH_NAME ?: 'developer'}"
 
 
-                    env.BRANCH_NAME = env.BRANCH_NAME ?: 'developer'
-                    def configFile = "${WORKSPACE}/app/.ci-config.yaml"
-                    if (!fileExists(configFile)) {
-                        error("Config file not found!")
+                            env.BRANCH_NAME = env.BRANCH_NAME ?: 'developer'
+                            def configFile = "${WORKSPACE}/app/.ci-config.yaml"
+                            if (!fileExists(configFile)) {
+                                error("Config file not found!")
+                            }
+                            def cfg = readYaml(file: configFile)
+                            env.FULL_IMAGE_NAME = cfg.dockerImage ?: "docker.io/archcra/${cfg.appName}"
+                            env.REPO_URL = cfg.infraRepoUrl ?: 'git@github.com:arch-hcra/st31.git'
+                            env.TARGET_PATH = cfg.infraRepoTargetPath ?: 'app-infra/overlays/dev'
+                            env.APP_NAME = cfg.appName
+                            env.IMAGE_TAG = env.BRANCH_NAME == 'main' ? 'latest' : "${env.APP_NAME}-${env.BRANCH_NAME}-${env.BUILD_NUMBER}"
+                        }
                     }
-                    def cfg = readYaml(file: configFile)
-                    env.FULL_IMAGE_NAME = cfg.dockerImage ?: "docker.io/archcra/${cfg.appName}"
-                    env.REPO_URL = cfg.infraRepoUrl ?: 'git@github.com:arch-hcra/st31.git'
-                    env.TARGET_PATH = cfg.infraRepoTargetPath ?: 'app-infra/overlays/dev'
-                    env.APP_NAME = cfg.appName
-                    env.IMAGE_TAG = env.BRANCH_NAME == 'main' ? 'latest' : "${env.APP_NAME}-${env.BRANCH_NAME}-${env.BUILD_NUMBER}"
                 }
             }
-        }
-    }
 
             stage('Build & Test') {
                 steps {
