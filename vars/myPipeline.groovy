@@ -3,7 +3,7 @@ def call(Map configParams) {
         agent {
             kubernetes {
                 defaultContainer 'jnlp'
-                yaml """
+yaml """
 apiVersion: v1
 kind: Pod
 metadata:
@@ -14,34 +14,34 @@ spec:
   volumes:
     - name: workspace-volume
       emptyDir: {}
-    - name: ssh-key-volume  # <-- Новый том для ключа
+    - name: ssh-key-volume
       secret:
         secretName: jenkins-ssh-key
         defaultMode: 0600
   containers:
     - name: jnlp
       image: jenkins/inbound-agent:latest
-      args: ['\$(JENKINS_SECRET)', '\$(JENKINS_NAME)']
+      args: ['$(JENKINS_SECRET)', '$(JENKINS_NAME)']
       volumeMounts:
         - name: workspace-volume
           mountPath: /home/jenkins/agent
-        - name: ssh-key-volume  # <-- Монтируем ключ
+        - name: ssh-key-volume
           mountPath: /home/jenkins/.ssh/id_rsa
           subPath: ssh-key
-  - name: python
-    image: python:3.9
-    command: ['cat']
-    tty: true
-    volumeMounts:
-      - name: workspace-volume
-        mountPath: /home/jenkins/agent
-  - name: tools
-    image: alpine/kubectl:latest
-    command: ['/bin/sh', '-c', 'apk add --no-cache curl git yq && cat']
-    tty: true
-    volumeMounts:
-      - name: workspace-volume
-        mountPath: /home/jenkins/agent
+    - name: python
+      image: python:3.9
+      command: ['cat']
+      tty: true
+      volumeMounts:
+        - name: workspace-volume
+          mountPath: /home/jenkins/agent
+    - name: tools
+      image: alpine/kubectl:latest
+      command: ['/bin/sh', '-c', 'apk add --no-cache curl git yq && cat']
+      tty: true
+      volumeMounts:
+        - name: workspace-volume
+          mountPath: /home/jenkins/agent
 """
             }
         }
@@ -168,3 +168,4 @@ spec:
         }
     }
 }
+
