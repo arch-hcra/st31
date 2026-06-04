@@ -1,52 +1,47 @@
 def call(Map configParams) {
     pipeline {
         agent {
-            kubernetes {
-                defaultContainer 'jnlp'
-                yaml """
-apiVersion: v1
-kind: Pod
-metadata:
-  labels:
-    jenkins: agent
-spec:
-  serviceAccountName: default
-  volumes:
-  - name: workspace-volume
-    emptyDir: {}
-  containers:
-  - name: jnlp
-    image: jenkins/inbound-agent:latest
-    args: ['\$(JENKINS_SECRET)', '\$(JENKINS_NAME)']
-    volumeMounts:
-      - name: workspace-volume
-        mountPath: /home/jenkins/agent
-  - name: dind
-    image: docker:dind
-    command: ['dockerd-entrypoint.sh']
-    args: ['--tls=false']
-    securityContext:
-      privileged: true
-    volumeMounts:
-      - name: workspace-volume
-        mountPath: /home/jenkins/agent
-  - name: python
-    image: python:3.9
-    command: ['cat']
-    tty: true
-    volumeMounts:
-      - name: workspace-volume
-        mountPath: /home/jenkins/agent
-  - name: tools
-    image: alpine/kubectl:latest
-    command: ['/bin/sh', '-c', 'apk add --no-cache curl git yq && cat']
-    tty: true
-    volumeMounts:
-      - name: workspace-volume
-        mountPath: /home/jenkins/agent
-"""
+        kubernetes {
+            yaml """
+                apiVersion: v1
+                kind: Pod
+                metadata:
+                  name: jenkins-agent-${BUILD_ID}
+                spec:
+                  containers:
+                  - name: jnlp
+                    image: jenkins/jnlp-agent:latest
+                    resources:
+                      limits:
+                        memory: "2Gi"
+                        cpu: "1"
+                  - name: dind
+                    image: docker:dind-rootless
+                    securityContext:
+                      runAsUser: 1000
+                      privileged: false
+                    volumeMounts:
+                    - name: docker-sock
+                      mountPath: /var/run/docker-sock.sock
+                    resources:
+                      limits:
+                        memory: "4Gi"
+                  - name: python
+                    image: python:3.9-slim
+                    volumeMounts:
+                    - name: docker-sock
+                      mountPath: /var/run/docker-sock.sock
+                  - name: tools
+                    image: alpine/git
+                  volumes:
+                  - name: docker-sock
+                    emptyDir: {}
+                  - name: workspace
+                    emptyDir: {}
+                """
             }
         }
+    }
 
         environment {
             GIT_CREDENTIALS_ID = 'jenkins_1'
@@ -80,8 +75,12 @@ spec:
                 steps {
                     container('python') {
                         script {
-                            sh "pip install -r app/requirements.txt"
-                            sh "pytest app/test/test_app.py -v"
+                                sh """
+                                    pip install --upgrade pip
+                                    pip install -r app/requirements.txt --user
+                                """
+                                sh "pytest app/test/test_app.py -v --junitxml=report.xml"
+                                junit '**/report.xml'
                         }
                     }
                 }
