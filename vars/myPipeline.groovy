@@ -80,12 +80,12 @@ spec:
                 steps {
                     container('python') {
                         script {
-                                sh """
-                                    pip install --upgrade pip
-                                    pip install -r app/requirements.txt --user
-                                """
-                                sh "pytest app/test/test_app.py -v --junitxml=report.xml"
-                                junit '**/report.xml'
+                            sh '''
+                                python3 -m venv venv
+                                . venv/bin/activate
+                                pip install --default-timeout=120 -r app/requirements.txt
+                                pytest app/test/test_app.py
+                            '''
                         }
                     }
                 }
