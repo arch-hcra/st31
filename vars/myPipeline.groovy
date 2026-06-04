@@ -1,47 +1,52 @@
 def call(Map configParams) {
     pipeline {
         agent {
-        kubernetes {
-            yaml """
-                apiVersion: v1
-                kind: Pod
-                metadata:
-                  name: jenkins-agent-${BUILD_ID}
-                spec:
-                  containers:
-                  - name: jnlp
-                    image: jenkins/inbound-agent:latest
-                    resources:
-                      limits:
-                        memory: "256Mi"
-                        cpu: "1"
-                  - name: dind
-                    image: docker:dind-rootless
-                    securityContext:
-                      runAsUser: 1000
-                      privileged: false
-                    volumeMounts:
-                    - name: docker-sock
-                      mountPath: /var/run/docker-sock.sock
-                    resources:
-                      limits:
-                        memory: "512Mi"
-                  - name: python
-                    image: python:3.9-slim
-                    volumeMounts:
-                    - name: docker-sock
-                      mountPath: /var/run/docker-sock.sock
-                  - name: tools
-                    image: alpine/git
-                  volumes:
-                  - name: docker-sock
-                    emptyDir: {}
-                  - name: workspace
-                    emptyDir: {}
-                """
+            kubernetes {
+                defaultContainer 'jnlp'
+                yaml """
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    jenkins: agent
+spec:
+  serviceAccountName: default
+  volumes:
+  - name: workspace-volume
+    emptyDir: {}
+  containers:
+  - name: jnlp
+    image: jenkins/inbound-agent:latest
+    args: ['\$(JENKINS_SECRET)', '\$(JENKINS_NAME)']
+    volumeMounts:
+      - name: workspace-volume
+        mountPath: /home/jenkins/agent
+  - name: dind
+    image: docker:dind
+    command: ['dockerd-entrypoint.sh']
+    args: ['--tls=false']
+    securityContext:
+      privileged: true
+    volumeMounts:
+      - name: workspace-volume
+        mountPath: /home/jenkins/agent
+  - name: python
+    image: python:3.9
+    command: ['cat']
+    tty: true
+    volumeMounts:
+      - name: workspace-volume
+        mountPath: /home/jenkins/agent
+  - name: tools
+    image: alpine/kubectl:latest
+    command: ['/bin/sh', '-c', 'apk add --no-cache curl git yq && cat']
+    tty: true
+    volumeMounts:
+      - name: workspace-volume
+        mountPath: /home/jenkins/agent
+"""
             }
         }
-    
 
         environment {
             GIT_CREDENTIALS_ID = 'jenkins_1'
