@@ -10,7 +10,7 @@ def call(Map configParams) {
                 spec:
                   containers:
                   - name: jnlp
-                    image: jenkins/jnlp-agent:latest
+                    image: jenkins/inbound-agent:latest
                     resources:
                       limits:
                         memory: "256Mi"
