@@ -3,7 +3,7 @@ def call(Map configParams) {
         agent {
             kubernetes {
                 defaultContainer 'jnlp'
-yaml """
+                yaml """
 apiVersion: v1
 kind: Pod
 metadata:
