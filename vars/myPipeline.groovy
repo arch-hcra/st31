@@ -50,7 +50,8 @@ spec:
             GIT_CREDENTIALS_ID = 'jenkins_1'
         }
 
-            stage('Checkout & Load Config') {
+    stages {
+           stage('Checkout & Load Config') {
                 steps {
                     container('jnlp') {
                         script {
@@ -84,6 +85,7 @@ spec:
                     }
                 }
             }
+    
 
             stage('Build & Test') {
                 steps {
@@ -165,4 +167,4 @@ spec:
 
         }
     }
-
+}
