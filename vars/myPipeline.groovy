@@ -13,7 +13,7 @@ def call(Map configParams) {
                     image: jenkins/jnlp-agent:latest
                     resources:
                       limits:
-                        memory: "2Gi"
+                        memory: "256Mb"
                         cpu: "1"
                   - name: dind
                     image: docker:dind-rootless
@@ -25,7 +25,7 @@ def call(Map configParams) {
                       mountPath: /var/run/docker-sock.sock
                     resources:
                       limits:
-                        memory: "4Gi"
+                        memory: "512Mb"
                   - name: python
                     image: python:3.9-slim
                     volumeMounts:
