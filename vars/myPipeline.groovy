@@ -28,7 +28,6 @@ spec:
     securityContext:
       privileged: true
     volumeMounts:
-      # Монтируем тот же диск, что и у jnlp
       - name: workspace-volume
         mountPath: /home/jenkins/agent
   - name: python
@@ -81,8 +80,12 @@ spec:
                 steps {
                     container('python') {
                         script {
-                            sh "pip install -r app/requirements.txt"
-                            sh "pytest app/test/test_app.py -v"
+                            sh '''
+                                python3 -m venv venv
+                                . venv/bin/activate
+                                pip install --default-timeout=120 -r app/requirements.txt
+                                pytest app/test/test_app.py
+                            '''
                         }
                     }
                 }
