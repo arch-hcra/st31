@@ -134,16 +134,18 @@ spec:
                 steps {
                     container('tools') {
                         script {
-                            withCredentials([string(
-                                credentialsId: 'jenkins_1', 
-                                variable: 'GIT_TOKEN'
+                            withCredentials([sshUserPrivateKey(
+                                credentialsId: 'jenkins_1',
+                                keyFileVariable: 'SSH_KEY'
                             )]) {
-                                
-                                sh '''
-                                    git clone git@github.com:arch-hcra/st31.git /tmp/infra-repo
-                                    cd /tmp/infra-repo
-                                    git checkout ${env.BRANCH_NAME}
+                                git(
+                                    url: 'git@github.com:arch-hcra/st31.git',
+                                    branch: "${env.BRANCH_NAME}",
+                                    credentialsId: 'jenkins_1',
+                                    changelog: false
+                                )
 
+                                sh '''
                                     yq eval '.images[0].newTag = "${env.IMAGE_TAG}"' ${env.TARGET_PATH}/kustomization.yaml -i
 
                                     git config --global user.email "jenkins@ci.local"
