@@ -49,7 +49,7 @@ spec:
         }
 
         environment {
-            GIT_CREDENTIALS_ID = 'jenkins_1'
+            GIT_CREDENTIALS_ID = 'jenkins@ci'
         }
 
         stages {
@@ -135,13 +135,13 @@ spec:
                     container('tools') {
                         script {
                             withCredentials([sshUserPrivateKey(
-                                credentialsId: 'jenkins_1',
+                                credentialsId: 'jenkins@ci',
                                 keyFileVariable: 'SSH_KEY'
                             )]) {
                                 git(
                                     url: 'git@github.com:arch-hcra/st31.git',
                                     branch: "${env.BRANCH_NAME}",
-                                    credentialsId: 'jenkins_1',
+                                    credentialsId: 'jenkins@ci',
                                     changelog: false
                                 )
 
