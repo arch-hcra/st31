@@ -128,39 +128,52 @@ spec:
             }
 
             stage('Update Manifests') {
-                when {
-                    expression { env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'developer' }
-                }
+                when { expression { env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'developer' } }
                 steps {
                     container('tools') {
                         script {
+                            sh '''
+                                mkdir -p ~/.ssh
+                                ssh-keyscan github.com >> ~/.ssh/known_hosts
+                                chmod 644 ~/.ssh/known_hosts
+                            '''
+
                             withCredentials([sshUserPrivateKey(
                                 credentialsId: 'jenkins@ci',
                                 keyFileVariable: 'SSH_KEY'
                             )]) {
-                                git(
-                                    url: 'git@github.com:arch-hcra/st31.git',
-                                    branch: "${env.BRANCH_NAME}",
-                                    credentialsId: 'jenkins@ci',
-                                    changelog: false
-                                )
+                                withEnv(["PATH+SSH_AUTH_SOCK=${env.SSH_AUTH_SOCK}"]) {
+                                    sh '''
+                                        eval \`ssh-agent -s\`
+                                        echo "${SSH_KEY}" | tr -d '\r' | ssh-add -
+                                        git config --global core.sshCommand "ssh -i /home/jenkins/agent/.ssh/id_rsa -o StrictHostKeyChecking=no"
+                                    '''
 
-                                sh '''
-                                    yq eval '.images[0].newTag = "${env.IMAGE_TAG}"' ${env.TARGET_PATH}/kustomization.yaml -i
+                                    git(
+                                        url: env.REPO_URL,
+                                        branch: env.BRANCH_NAME,
+                                        credentialsId: 'jenkins@ci',
+                                        changelog: false
+                                    )
 
-                                    git config --global user.email "jenkins@ci.local"
-                                    git config --global user.name "Jenkins CI"
-
-                                    git add ${env.TARGET_PATH}/kustomization.yaml
-                                    git commit -m "chore: update image tag to ${env.IMAGE_TAG} [skip ci]"
-                                    git push git@github.com:arch-hcra/st31.git HEAD:${env.BRANCH_NAME}
-                                '''
+                                    sh '''
+                                        if [ ! -f ${env.TARGET_PATH}/kustomization.yaml ]; then
+                                            echo "Error: kustomization.yaml not found in ${env.TARGET_PATH}"
+                                            exit 1
+                                        fi
+                                        yq eval '.images[0].newTag = "${env.IMAGE_TAG}"' ${env.TARGET_PATH}/kustomization.yaml -i
+                                        git config --global user.email "jenkins@ci.local"
+                                        git config --global user.name "Jenkins CI"
+                                        git add ${env.TARGET_PATH}/kustomization.yaml
+                                        git commit -m "chore: update image tag to ${env.IMAGE_TAG} [skip ci]"
+                                        git push ${env.REPO_URL} HEAD:${env.BRANCH_NAME}
+                                    '''
+                                }
                             }
                         }
                     }
                 }
             }
-
         }
     }
 }
