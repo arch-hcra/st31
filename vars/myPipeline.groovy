@@ -127,7 +127,7 @@ spec:
                 }
             }
 
-            stage('Update Manifests') {
+             stage('Update Manifests') {
                 when { expression { env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'developer' } }
                 steps {
                     container('tools') {
@@ -143,11 +143,13 @@ spec:
                                 keyFileVariable: 'SSH_KEY'
                             )]) {
                                 withEnv(["PATH+SSH_AUTH_SOCK=${env.SSH_AUTH_SOCK}"]) {
+
                                     sh '''
-                                        eval \`ssh-agent -s\`
+                                        eval $(ssh-agent -s)
                                         echo "${SSH_KEY}" | tr -d '\r' | ssh-add -
                                         git config --global core.sshCommand "ssh -i /home/jenkins/agent/.ssh/id_rsa -o StrictHostKeyChecking=no"
                                     '''
+
 
                                     git(
                                         url: env.REPO_URL,
@@ -157,10 +159,6 @@ spec:
                                     )
 
                                     sh '''
-                                        if [ ! -f ${env.TARGET_PATH}/kustomization.yaml ]; then
-                                            echo "Error: kustomization.yaml not found in ${env.TARGET_PATH}"
-                                            exit 1
-                                        fi
                                         yq eval '.images[0].newTag = "${env.IMAGE_TAG}"' ${env.TARGET_PATH}/kustomization.yaml -i
                                         git config --global user.email "jenkins@ci.local"
                                         git config --global user.name "Jenkins CI"
