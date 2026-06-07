@@ -49,7 +49,7 @@ spec:
         }
 
         environment {
-            GIT_CREDENTIALS_ID = 'jenkins@ci'
+            GIT_CREDENTIALS_ID = 'jenkins_1'
         }
 
         stages {
@@ -67,7 +67,7 @@ spec:
 
                             def cfg = readYaml(file: configFile)
                             env.FULL_IMAGE_NAME = cfg.dockerImage ?: "docker.io/archcra/${cfg.appName}"
-                            env.REPO_URL = cfg.infraRepoUrl ?: "git@github.com:arch-hcra/st31.git"
+                            env.REPO_URL = cfg.infraRepoUrl ?: 'https://github.com/arch-hcra/st31.git'
                             env.TARGET_PATH = cfg.infraRepoTargetPath ?: 'app-infra/overlays/dev'
                             env.APP_NAME = cfg.appName
                             env.IMAGE_TAG = env.BRANCH_NAME == 'main' ? 'latest' : "${env.APP_NAME}-${env.BRANCH_NAME}-${env.BUILD_NUMBER}"
@@ -80,12 +80,13 @@ spec:
                 steps {
                     container('python') {
                         script {
-                            sh '''
-                                python3 -m venv venv
-                                . venv/bin/activate
-                                pip install --default-timeout=120 -r app/requirements.txt
-                                pytest app/test/test_app.py
-                            '''
+                                sh """
+                                    pip install --upgrade pip
+                                    pip install -r app/requirements.txt --user
+                                """
+                                sh "pytest app/test/test_app.py -v --junitxml=report.xml"
+                                junit '**/report.xml'
+                                
                         }
                     }
                 }
@@ -127,51 +128,37 @@ spec:
                 }
             }
 
-             stage('Update Manifests') {
-                when { expression { env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'developer' } }
+            stage('Update Manifests') {
+                when {
+                    expression { env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'developer' }
+                }
                 steps {
                     container('tools') {
                         script {
-                            sh '''
-                                mkdir -p ~/.ssh
-                                ssh-keyscan github.com >> ~/.ssh/known_hosts
-                                chmod 644 ~/.ssh/known_hosts
-                            '''
-
-                            withCredentials([sshUserPrivateKey(
-                                credentialsId: 'jenkins@ci',
-                                keyFileVariable: 'SSH_KEY'
+                            withCredentials([string(
+                                credentialsId: 'jenkins_1', 
+                                variable: 'GIT_TOKEN'
                             )]) {
-                                withEnv(["PATH+SSH_AUTH_SOCK=${env.SSH_AUTH_SOCK}"]) {
+                                sh """
+                                    git clone https://${GIT_TOKEN}@github.com/arch-hcra/st31.git /tmp/infra-repo
+                                    cd /tmp/infra-repo
+                                    git checkout ${env.BRANCH_NAME}
+                                    
+                                    yq eval '.images[0].newTag = "${env.IMAGE_TAG}"' ${env.TARGET_PATH}/kustomization.yaml -i
 
-                                    sh '''
-                                        eval $(ssh-agent -s)
-                                        echo "${SSH_KEY}" | tr -d '\r' | ssh-add -
-                                        git config --global core.sshCommand "ssh -i /home/jenkins/agent/.ssh/id_rsa -o StrictHostKeyChecking=no"
-                                    '''
+                                    git config --global user.email "jenkins@ci.local"
+                                    git config --global user.name "Jenkins CI"
 
-
-                                    git(
-                                        url: env.REPO_URL,
-                                        branch: env.BRANCH_NAME,
-                                        credentialsId: 'jenkins@ci',
-                                        changelog: false
-                                    )
-
-                                    sh '''
-                                        yq eval '.images[0].newTag = "${env.IMAGE_TAG}"' ${env.TARGET_PATH}/kustomization.yaml -i
-                                        git config --global user.email "jenkins@ci.local"
-                                        git config --global user.name "Jenkins CI"
-                                        git add ${env.TARGET_PATH}/kustomization.yaml
-                                        git commit -m "chore: update image tag to ${env.IMAGE_TAG} [skip ci]"
-                                        git push ${env.REPO_URL} HEAD:${env.BRANCH_NAME}
-                                    '''
-                                }
+                                    git add ${env.TARGET_PATH}/kustomization.yaml
+                                    git commit -m "chore: update image tag to ${env.IMAGE_TAG} [skip ci]"
+                                    git push https://${GIT_TOKEN}@github.com/arch-hcra/st31.git HEAD:${env.BRANCH_NAME}
+                                """
                             }
                         }
                     }
                 }
             }
+
         }
     }
 }
