@@ -16,12 +16,9 @@ spec:
     image: jenkins/inbound-agent:latest
     args: ['\$(JENKINS_SECRET)', '\$(JENKINS_NAME)']
 
-  - name: dind
-    image: docker:dind
-    command: ['dockerd-entrypoint.sh']
-    args: ['--tls=false']
-    securityContext:
-      privileged: true
+  - name: kaniko
+    image: gcr.io/kaniko-project/executor:latest
+    args: ["--dockerfile=app/Dockerfile", "--context=dir:///workspace/app", "--destination=${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}"]
 
   - name: python
     image: python:3.9
@@ -38,6 +35,7 @@ spec:
       cat
     tty: true
 """
+
             }
         }
 
@@ -99,9 +97,15 @@ spec:
 
             stage('Build Docker Image') {
                 steps {
-                    container('dind') {
+                    container('kaniko') {
                         script {
-                            sh "docker build -t ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG} -f app/Dockerfile app"
+                            sh """
+                                /kaniko/executor \
+                                    --dockerfile=app/Dockerfile \
+                                    --context=dir:///workspace/app \
+                                    --destination=${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG} \
+                                    --verbosity=debug
+                            """
                         }
                     }
                 }
