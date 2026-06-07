@@ -10,20 +10,11 @@ metadata:
   labels:
     jenkins: agent
 spec:
-  serviceAccountName: default
+  serviceAccountName: kaniko-builder  # <-- Используем наш ServiceAccount
   containers:
   - name: jnlp
     image: jenkins/inbound-agent:latest
     args: ['\$(JENKINS_SECRET)', '\$(JENKINS_NAME)']
-    volumeMounts:
-      - name: docker-config
-        mountPath: /tmp
-
-  - name: kaniko
-    image: gcr.io/kaniko-project/executor:v1.17.0
-    volumeMounts:
-      - name: docker-config
-        mountPath: /tmp
 
   - name: python
     image: python:3.9
@@ -40,9 +31,20 @@ spec:
       cat
     tty: true
 
-  volumes:
+  # <-- Убираем dind, добавляем kaniko
+  - name: kaniko
+    image: gcr.io/kaniko-project/executor:latest
+    args: ["--dockerfile=app/Dockerfile", "--context=dir:///workspace/app"]
+    command: ["/busybox/sleep", "infinity"]
+    volumeMounts:
     - name: docker-config
-      emptyDir: {}
+      mountPath: /kaniko/.docker
+    securityContext:
+      runAsUser: 0  # Kaniko требует root
+  volumes:
+  - name: docker-config
+    secret:
+      secretName: regcred  # <-- Наш Secret для Docker Hub
 """
             }
         }
@@ -58,23 +60,14 @@ spec:
                         script {
                             checkout scm
                             env.BRANCH_NAME = env.BRANCH_NAME ?: 'developer'
-
                             def configFile = "${WORKSPACE}/app/.ci-config.yaml"
-                            if (!fileExists(configFile)) {
-                                error("Config file ${configFile} not found!")
-                            }
-
+                            if (!fileExists(configFile)) error("Config file not found!")
                             def cfg = readYaml(file: configFile)
-                            if (!cfg || !cfg.appName) {
-                                error("Invalid config: 'appName' is required!")
-                            }
-
                             env.FULL_IMAGE_NAME = cfg.dockerImage ?: "docker.io/archcra/${cfg.appName}"
                             env.REPO_URL = cfg.infraRepoUrl ?: 'https://github.com/arch-hcra/st31.git'
                             env.TARGET_PATH = cfg.infraRepoTargetPath ?: 'app-infra/overlays/dev'
                             env.APP_NAME = cfg.appName
                             env.IMAGE_TAG = env.BRANCH_NAME == 'main' ? 'latest' : "${env.APP_NAME}-${env.BRANCH_NAME}-${env.BUILD_NUMBER}"
-
                             echo "=== CONFIG LOADED ==="
                             echo "Image: ${env.FULL_IMAGE_NAME}"
                             echo "Tag: ${env.IMAGE_TAG}"
@@ -96,33 +89,26 @@ spec:
                 }
             }
 
-            stage('Build & Push Docker Image') {
+            stage('Build Docker Image with Kaniko') {
                 steps {
                     container('kaniko') {
                         script {
-                            withCredentials([usernamePassword(
-                                credentialsId: 'docker_token_1',
-                                usernameVariable: 'DOCKER_USER',
-                                passwordVariable: 'DOCKER_PASS'
-                            )]) {
-                                withTempDir(dir: 'temp', script: {
-                                    writeFile file: "${tempDir}/docker-config.json", text: '''
-                                    {
-                                        "auths": {
-                                            "https://index.docker.io/v1/": {
-                                                "auth": "${base64(DOCKER_USER:DOCKER_PASS)}"
-                                            }
-                                        }
-                                    }
-                                    '''
-                                    // Прямой вызов kaniko без оболочки
-                                    sh "/kaniko/executor \
-                                        --dockerfile=app/Dockerfile \
-                                        --context=\"dir://${WORKSPACE}/app\" \
-                                        --destination=${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG} \
-                                        --verbosity=debug \
-                                        --registry-config=${tempDir}/docker-config.json"
-                                })
+  
+                            sh """
+                                /kaniko/executor \
+                                  --context=dir:///workspace/app \
+                                  --dockerfile=app/Dockerfile \
+                                  --destination=${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG} \
+                                  --verbosity=debug
+                            """
+                            if (env.BRANCH_NAME == 'main') {
+                                sh """
+                                    /kaniko/executor \
+                                      --context=dir:///workspace/app \
+                                      --dockerfile=app/Dockerfile \
+                                      --destination=${env.FULL_IMAGE_NAME}:latest \
+                                      --verbosity=debug
+                                """
                             }
                         }
                     }
@@ -144,14 +130,11 @@ spec:
                                     git clone https://${GIT_TOKEN}@github.com/arch-hcra/st31.git /tmp/infra-repo
                                     cd /tmp/infra-repo
                                     git checkout ${env.BRANCH_NAME}
-
-                                    yq eval '.images[0].newTag = \"${env.IMAGE_TAG}\"' ${env.TARGET_PATH}/kustomization.yaml -i
-
-                                    git config --global user.email \"jenkins@ci.local\"
-                                    git config --global user.name \"Jenkins CI\"
-
+                                    yq eval '.images[0].newTag = "${env.IMAGE_TAG}"' ${env.TARGET_PATH}/kustomization.yaml -i
+                                    git config --global user.email "jenkins@ci.local"
+                                    git config --global user.name "Jenkins CI"
                                     git add ${env.TARGET_PATH}/kustomization.yaml
-                                    git commit -m \"chore: update image tag to ${env.IMAGE_TAG} [skip ci]\"\"
+                                    git commit -m "chore: update image tag to ${env.IMAGE_TAG} [skip ci]"
                                     git push https://${GIT_TOKEN}@github.com/arch-hcra/st31.git HEAD:${env.BRANCH_NAME}
                                 """
                             }
