@@ -93,21 +93,20 @@ spec:
                 steps {
                     container('kaniko') {
                         script {
-  
                             sh """
                                 /kaniko/executor \
-                                  --context=dir:///workspace/app \
-                                  --dockerfile=app/Dockerfile \
-                                  --destination=${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG} \
-                                  --verbosity=debug
+                                --context=dir:///workspace/app \
+                                --dockerfile=app/Dockerfile \
+                                --destination=${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG} \
+                                --verbosity=debug
                             """
                             if (env.BRANCH_NAME == 'main') {
                                 sh """
                                     /kaniko/executor \
-                                      --context=dir:///workspace/app \
-                                      --dockerfile=app/Dockerfile \
-                                      --destination=${env.FULL_IMAGE_NAME}:latest \
-                                      --verbosity=debug
+                                    --context=dir:///workspace/app \
+                                    --dockerfile=app/Dockerfile \
+                                    --destination=${env.FULL_IMAGE_NAME}:latest \
+                                    --verbosity=debug
                                 """
                             }
                         }
