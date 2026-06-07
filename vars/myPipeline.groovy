@@ -31,20 +31,20 @@ spec:
       cat
     tty: true
 
-  # <-- Убираем dind, добавляем kaniko
+ 
   - name: kaniko
     image: gcr.io/kaniko-project/executor:latest
     args: ["--dockerfile=app/Dockerfile", "--context=dir:///workspace/app"]
-    command: ["/busybox/sleep", "infinity"]
+
     volumeMounts:
     - name: docker-config
       mountPath: /kaniko/.docker
     securityContext:
-      runAsUser: 0  # Kaniko требует root
+      runAsUser: 0 
   volumes:
   - name: docker-config
     secret:
-      secretName: regcred  # <-- Наш Secret для Docker Hub
+      secretName: regcred  
 """
             }
         }
