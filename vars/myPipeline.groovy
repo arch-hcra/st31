@@ -4,6 +4,7 @@ def call(Map configParams) {
             kubernetes {
                 defaultContainer 'jnlp'
                 yaml """
+
 apiVersion: v1
 kind: Pod
 metadata:
@@ -14,7 +15,7 @@ spec:
   containers:
   - name: jnlp
     image: jenkins/inbound-agent:latest
-    args: ['$(JENKINS_SECRET)', '$(JENKINS_NAME)']
+    args: ['\$(JENKINS_SECRET)', '\$(JENKINS_NAME)']
     securityContext:
       allowPrivilegeEscalation: false
       readOnlyRootFilesystem: true
