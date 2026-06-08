@@ -85,28 +85,40 @@ spec:
             stage('Build & Push with Kaniko') {
                 steps {
                     script {
-                        // Собираем и пушим образ через Kaniko
-                        sh """
+                        // Отладочные выводы
+                        echo "🔍 Building and pushing image: ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}"
+                        echo "🔍 Branch: ${env.BRANCH_NAME}"
+                        echo "🔍 Kaniko command:"
+                        echo "/cnb/kaniko/executor \\"
+                        echo "  --context ${WORKSPACE}/app \\"
+                        echo "  --dockerfile ${WORKSPACE}/app/Dockerfile \\"
+                        echo "  --destination ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}"
+
+                        // Запуск Kaniko
+                        def kanikoCommand = """
                             /cnb/kaniko/executor \
-                              --context ${WORKSPACE}/app \
-                              --dockerfile ${WORKSPACE}/app/Dockerfile \
-                              --destination ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG} \
-                              --verbosity=debug \
-                              --registry-mirror=https://ваш_миррор_если_нужно \
-                              --use-new-run \
-                              --single-snapshot \
-                              --skip-tls-verify-on=0.0.0.0  # если нужен insecure registry
+                            --context ${WORKSPACE}/app \
+                            --dockerfile ${WORKSPACE}/app/Dockerfile \
+                            --destination ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG} \
+                            --verbosity=debug \
+                            --registry-mirror=https://mirror.gcr.io \
+                            --use-new-run \
+                            --single-snapshot
                         """
 
-                        // Дополнительно тегим latest для main
+                        sh kanikoCommand
+
+                        // Если ветка main, тегим latest
                         if (env.BRANCH_NAME == 'main') {
-                            sh """
+                            echo "🔍 Tagging as 'latest' for main branch..."
+                            def latestCommand = """
                                 /cnb/kaniko/executor \
-                                  --context ${WORKSPACE}/app \
-                                  --dockerfile ${WORKSPACE}/app/Dockerfile \
-                                  --destination ${env.FULL_IMAGE_NAME}:latest \
-                                  --verbosity=debug
+                                --context ${WORKSPACE}/app \
+                                --dockerfile ${WORKSPACE}/app/Dockerfile \
+                                --destination ${env.FULL_IMAGE_NAME}:latest \
+                                --verbosity=debug
                             """
+                            sh latestCommand
                         }
                     }
                 }
