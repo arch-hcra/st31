@@ -1,48 +1,48 @@
 def call(Map configParams) {
     pipeline {
-        agent {
-            kubernetes {
-                defaultContainer 'jnlp'
-                yaml """
-apiVersion: v1
-kind: Pod
-metadata:
-  labels:
-    jenkins: agent
-spec:
-  serviceAccountName: jenkins-kaniko
-  containers:
-  - name: jnlp
-    image: jenkins/inbound-agent:latest
-    args: ['\${JENKINS_SECRET}', '\${JENKINS_NAME}']
-    env:
-    - name: JENKINS_URL
-      value: "http://jenkins:8080"
+            agent {
+                kubernetes {
+                    yaml """
+            apiVersion: v1
+            kind: Pod
+            metadata:
+            labels:
+                jenkins: agent
+            spec:
+            serviceAccountName: jenkins-kaniko
+            containers:
+            - name: jnlp
+                image: jenkins/inbound-agent:latest
+                args: ['${JENKINS_SECRET}', '${JENKINS_NAME}']
+                env:
+                - name: JENKINS_URL
+                value: "http://jenkins:8080"
 
-  - name: python
-    image: python:3.9
-    command: ['sh', '-c', 'tail -f /dev/null']  # Заменяем cat на более корректный вариант
+            - name: python
+                image: python:3.9
+                command: ['tail', '-f', '/dev/null']
 
-  - name: tools
-    image: alpine/kubectl:latest
-    command: ['sh', '-c', 'sleep infinity']  # Бесконечный sleep вместо cat
+            - name: tools
+                image: alpine/kubectl:latest
+                command: ['sh', '-c', 'tail -f /dev/null']
 
-  - name: kaniko
-    image: gcr.io/kaniko-project/executor:latest
-    command: ['/busybox/sleep', 'infinity']  # Kaniko не нужен cat, используем sleep infinity
-    volumeMounts:
-    - name: docker-config
-      mountPath: /kaniko/.docker
-    securityContext:
-      runAsUser: 0
+            - name: kaniko   <-- Здесь НЕТ команды!
+                image: gcr.io/kaniko-project/executor:latest
+                volumeMounts:
+                - name: docker-config
+                mountPath: /kaniko/.docker
+                securityContext:
+                runAsUser: 0
 
-  volumes:
-  - name: docker-config
-    secret:
-      secretName: docker-hub-secret
-"""
+            volumes:
+            - name: docker-config
+                secret:
+                secretName: docker-hub-secret
+            """
+                }
             }
-        }
+
+
 
         environment {
             GIT_CREDENTIALS_ID = 'jenkins_1'
