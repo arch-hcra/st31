@@ -10,11 +10,11 @@ metadata:
   labels:
     jenkins: agent
 spec:
-  serviceAccountName: jenkins-kaniko  # Используем наш ServiceAccount
+  serviceAccountName: jenkins-kaniko
   containers:
   - name: jnlp
     image: jenkins/inbound-agent:latest
-    args: ['\$(JENKINS_SECRET)', '\$(JENKINS_NAME)']
+    args: ['\${JENKINS_SECRET}', '\${JENKINS_NAME}']
 
   - name: python
     image: python:3.9
@@ -30,6 +30,21 @@ spec:
       apk add --no-cache curl git yq
       cat
     tty: true
+
+  - name: kaniko
+    image: gcr.io/kaniko-project/executor:latest
+    command: ['cat']
+    tty: true
+    volumeMounts:
+    - name: docker-config
+      mountPath: /kaniko/.docker
+    securityContext:
+      runAsUser: 0
+
+  volumes:
+  - name: docker-config
+    secret:
+      secretName: docker-hub-secret
 """
             }
         }
@@ -69,13 +84,14 @@ spec:
                 }
             }
 
+            // Остальные stages остаются без изменений
             stage('Build & Test') {
                 steps {
                     container('python') {
                         sh '''
                             python3 -m venv venv
                             . venv/bin/activate
-                            pip install --default-timeout=120 -r app/requirements.txt
+                            pip install -r app/requirements.txt
                             pytest app/test/test_app.py
                         '''
                     }
@@ -84,41 +100,35 @@ spec:
 
             stage('Build & Push with Kaniko') {
                 steps {
-                    script {
-                        // Отладочные выводы
-                        echo "🔍 Building and pushing image: ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}"
-                        echo "🔍 Branch: ${env.BRANCH_NAME}"
-                        echo "🔍 Kaniko command:"
-                        echo "/cnb/kaniko/executor \\"
-                        echo "  --context ${WORKSPACE}/app \\"
-                        echo "  --dockerfile ${WORKSPACE}/app/Dockerfile \\"
-                        echo "  --destination ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}"
+                    container('kaniko') {
+                        script {
+                            echo "🔍 Building and pushing image: ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}"
+                            echo "🔍 Branch: ${env.BRANCH_NAME}"
 
-                        // Запуск Kaniko
-                        def kanikoCommand = """
-                            /cnb/kaniko/executor \
-                            --context ${WORKSPACE}/app \
-                            --dockerfile ${WORKSPACE}/app/Dockerfile \
-                            --destination ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG} \
-                            --verbosity=debug \
-                            --registry-mirror=https://mirror.gcr.io \
-                            --use-new-run \
-                            --single-snapshot
-                        """
-
-                        sh kanikoCommand
-
-                        // Если ветка main, тегим latest
-                        if (env.BRANCH_NAME == 'main') {
-                            echo "🔍 Tagging as 'latest' for main branch..."
-                            def latestCommand = """
-                                /cnb/kaniko/executor \
+                            def kanikoCommand = """
+                                /kaniko/executor \
                                 --context ${WORKSPACE}/app \
                                 --dockerfile ${WORKSPACE}/app/Dockerfile \
-                                --destination ${env.FULL_IMAGE_NAME}:latest \
-                                --verbosity=debug
+                                --destination ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG} \
+                                --verbosity=debug \
+                                --registry-mirror=https://mirror.gcr.io \
+                                --use-new-run \
+                                --single-snapshot
                             """
-                            sh latestCommand
+
+                            sh kanikoCommand
+
+                            if (env.BRANCH_NAME == 'main') {
+                                echo "🔍 Tagging as 'latest' for main branch..."
+                                def latestCommand = """
+                                    /kaniko/executor \
+                                    --context ${WORKSPACE}/app \
+                                    --dockerfile ${WORKSPACE}/app/Dockerfile \
+                                    --destination ${env.FULL_IMAGE_NAME}:latest \
+                                    --verbosity=debug
+                                """
+                                sh latestCommand
+                            }
                         }
                     }
                 }
@@ -140,11 +150,9 @@ spec:
                                     cd /tmp/infra-repo
                                     git checkout ${env.BRANCH_NAME}
 
-                                    yq eval '.images[0].newTag = "${env.IMAGE_TAG}"' ${env.TARGET_PATH}/kustomization.yaml -i
-
+                                    yq eval '.images[0].newTag = \"${env.IMAGE_TAG}\"' ${env.TARGET_PATH}/kustomization.yaml -i
                                     git config --global user.email "jenkins@ci.local"
                                     git config --global user.name "Jenkins CI"
-
                                     git add ${env.TARGET_PATH}/kustomization.yaml
                                     git commit -m "chore: update image tag to ${env.IMAGE_TAG} [skip ci]"
                                     git push https://${GIT_TOKEN}@github.com/arch-hcra/st31.git HEAD:${env.BRANCH_NAME}
