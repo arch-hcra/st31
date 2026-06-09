@@ -4,46 +4,46 @@ def call(Map configParams) {
             kubernetes {
                 defaultContainer 'jnlp'
                 yaml """
-                        apiVersion: v1
-                        kind: Pod
-                        metadata:
-                        namespace: jenkins
-                        labels:
-                            jenkins: agent
-                        spec:
-                        serviceAccountName: jenkins-kaniko-sa
-                        containers:
-                        - name: jnlp
-                            image: jenkins/inbound-agent:latest
-                            args: ['\$(JENKINS_SECRET)', '\$(JENKINS_NAME)']
-                        - name: python
-                            image: python:3.9
-                            command: ['cat']
-                            tty: true
-                        - name: tools
-                            image: alpine/kubectl:latest
-                            command: ['/bin/sh', '-c', 'apk add --no-cache curl git yq && cat']
-                            tty: true
-                        - name: kaniko
-                            image: gcr.io/kaniko-project/executor:v1.18.0
-                            command: []  
-                            args: ["--dockerfile=Dockerfile", "--context=dir:///workspace"]
-                            env:
-                            - name: DOCKER_CONFIG
-                            value: "/kaniko/.docker/config.json"
-                            volumeMounts:
-                            - name: docker-config
-                            mountPath: /kaniko/.docker
-                            securityContext:
-                            runAsUser: 0
-                        volumes:
-                        - name: docker-config
-                            secret:
-                            secretName: dockerhub-credentials
-                            items:
-                            - key: .dockerconfigjson
-                                path: config.json
-    """
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: jenkins
+  labels:
+    jenkins: agent
+spec:
+  serviceAccountName: jenkins-kaniko-sa
+  containers:
+  - name: jnlp
+    image: jenkins/inbound-agent:latest
+    args: ['\$(JENKINS_SECRET)', '\$(JENKINS_NAME)']
+  - name: python
+    image: python:3.9
+    command: ['cat']
+    tty: true
+  - name: tools
+    image: alpine/kubectl:latest
+    command: ['/bin/sh', '-c', 'apk add --no-cache curl git yq && cat']
+    tty: true
+  - name: kaniko
+    image: gcr.io/kaniko-project/executor:v1.18.0
+    command: []
+    args: ["--dockerfile=Dockerfile", "--context=dir:///workspace"]  # <-- Здесь ошибка была в отступах
+    env:
+    - name: DOCKER_CONFIG
+      value: "/kaniko/.docker/config.json"
+    volumeMounts:
+    - name: docker-config
+      mountPath: /kaniko/.docker
+    securityContext:
+      runAsUser: 0
+  volumes:
+  - name: docker-config
+    secret:
+      secretName: dockerhub-credentials
+      items:
+      - key: .dockerconfigjson
+        path: config.json
+"""
             }
         }
 
