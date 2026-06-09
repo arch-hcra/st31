@@ -15,7 +15,7 @@ def call(Map configParams) {
                         containers:
                         - name: jnlp
                             image: jenkins/inbound-agent:latest
-                            args: ['$(JENKINS_SECRET)', '$(JENKINS_NAME)']
+                            args: ['\$(JENKINS_SECRET)', '\$(JENKINS_NAME)']
                         - name: python
                             image: python:3.9
                             command: ['cat']
@@ -26,7 +26,7 @@ def call(Map configParams) {
                             tty: true
                         - name: kaniko
                             image: gcr.io/kaniko-project/executor:v1.18.0
-                            command: []  # <-- Пустая команда для Kaniko
+                            command: []  
                             args: ["--dockerfile=Dockerfile", "--context=dir:///workspace"]
                             env:
                             - name: DOCKER_CONFIG
