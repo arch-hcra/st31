@@ -10,7 +10,7 @@ metadata:
   labels:
     jenkins: agent
 spec:
-  serviceAccountName: jenkins-kaniko  # Используем наш ServiceAccount
+  serviceAccountName: jenkins-kaniko 
   containers:
   - name: jnlp
     image: jenkins/inbound-agent:latest
@@ -30,6 +30,21 @@ spec:
       apk add --no-cache curl git yq
       cat
     tty: true
+      - name: kaniko
+    image: gcr.io/kaniko-project/executor:latest 
+    command: ['cat']
+    tty: true
+    volumeMounts:
+    - name: docker-config
+      mountPath: /kaniko/.docker
+    securityContext:
+      runAsUser: 0  # Kaniko требует root
+
+    volumes:
+    - name: docker-config
+        secret:
+        secretName: docker-hub-secret  
+
 """
             }
         }
