@@ -11,7 +11,7 @@ metadata:
   labels:
     jenkins: agent
 spec:
-  serviceAccountName: jenkins-kaniko
+  serviceAccountName: jenkins-kaniko-sa
   containers:
   - name: jnlp
     image: jenkins/inbound-agent:latest
