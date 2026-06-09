@@ -7,7 +7,7 @@ def call(Map configParams) {
 apiVersion: v1
 kind: Pod
 metadata:
-  namespace: jenkins 
+  namespace: jenkins
   labels:
     jenkins: agent
 spec:
@@ -15,7 +15,7 @@ spec:
   containers:
   - name: jnlp
     image: jenkins/inbound-agent:latest
-    args: ['\$(JENKINS_SECRET)', '\$(JENKINS_NAME)']
+    args: ['$(JENKINS_SECRET)', '$(JENKINS_NAME)']
   - name: python
     image: python:3.9
     command: ['cat']
@@ -26,25 +26,23 @@ spec:
     tty: true
   - name: kaniko
     image: gcr.io/kaniko-project/executor:v1.18.0
-    command: ['sleep', 'infinity']
+    command: []  # <-- Пустая команда для Kaniko
+    args: ["--dockerfile=Dockerfile", "--context=dir:///workspace"]
     env:
     - name: DOCKER_CONFIG
       value: "/kaniko/.docker/config.json"
     volumeMounts:
     - name: docker-config
-      mountPath: /kaniko/.docker 
+      mountPath: /kaniko/.docker
     securityContext:
       runAsUser: 0
   volumes:
   - name: docker-config
-    projected:
-      sources:
-      - secret:
-          name: dockerhub-credentials
-          namespace: jenkins
-          items:
-            - key: .dockerconfigjson
-              path: config.json
+    secret:
+      secretName: dockerhub-credentials
+      items:
+      - key: .dockerconfigjson
+        path: config.json
     """
             }
         }
