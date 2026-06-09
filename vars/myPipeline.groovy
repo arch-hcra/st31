@@ -7,6 +7,7 @@ def call(Map configParams) {
 apiVersion: v1
 kind: Pod
 metadata:
+  namespace: jenkins 
   labels:
     jenkins: agent
 spec:
@@ -14,41 +15,37 @@ spec:
   containers:
   - name: jnlp
     image: jenkins/inbound-agent:latest
-    args: ['\$(JENKINS_SECRET)', '\$(JENKINS_NAME)']
-
+    args: ['$(JENKINS_SECRET)', '$(JENKINS_NAME)']
   - name: python
     image: python:3.9
     command: ['cat']
     tty: true
-
   - name: tools
     image: alpine/kubectl:latest
-    command:
-    - /bin/sh
-    - -c
-    - |
-      apk add --no-cache curl git yq
-      cat
+    command: ['/bin/sh', '-c', 'apk add --no-cache curl git yq && cat']
     tty: true
-
   - name: kaniko
     image: gcr.io/kaniko-project/executor:v1.18.0
-    command: ['sleep', 'infinity'] 
+    command: ['sleep', 'infinity']
     env:
     - name: DOCKER_CONFIG
-      value: "/etc/docker/config.json"
+      value: "/kaniko/.docker/config.json"
     volumeMounts:
     - name: docker-config
-      mountPath: /etc/docker
+      mountPath: /kaniko/.docker 
     securityContext:
-      runAsUser: 0 
-
+      runAsUser: 0
   volumes:
   - name: docker-config
-    secret:
-      secretName: dockerhub-credentials 
-      optional: false
-"""
+    projected:
+      sources:
+      - secret:
+          name: dockerhub-credentials
+          namespace: jenkins
+          items:
+            - key: .dockerconfigjson
+              path: config.json
+    """
             }
         }
 
