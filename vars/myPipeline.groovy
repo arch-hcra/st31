@@ -14,7 +14,7 @@ spec:
   containers:
   - name: jnlp
     image: jenkins/inbound-agent:latest
-    args: ['$(JENKINS_SECRET)', '$(JENKINS_NAME)']
+    args: ['\${JENKINS_SECRET}', '\${JENKINS_NAME}']
 
   - name: python
     image: python:3.9
@@ -50,7 +50,7 @@ spec:
         }
 
         environment {
-            GIT_CREDENTIALS_ID = 'jenkins@ci'
+            GIT_CREDENTIALS_ID = 'jenkins_1'
         }
 
         stages {
@@ -84,6 +84,7 @@ spec:
                 }
             }
 
+            // Остальные stages остаются без изменений
             stage('Build & Test') {
                 steps {
                     container('python') {
@@ -101,7 +102,6 @@ spec:
                 steps {
                     container('kaniko') {
                         script {
-
                             echo "🔍 Building and pushing image: ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}"
                             echo "🔍 Branch: ${env.BRANCH_NAME}"
 
@@ -117,7 +117,6 @@ spec:
                             """
 
                             sh kanikoCommand
-
 
                             if (env.BRANCH_NAME == 'main') {
                                 echo "🔍 Tagging as 'latest' for main branch..."
@@ -152,10 +151,8 @@ spec:
                                     git checkout ${env.BRANCH_NAME}
 
                                     yq eval '.images[0].newTag = \"${env.IMAGE_TAG}\"' ${env.TARGET_PATH}/kustomization.yaml -i
-
                                     git config --global user.email "jenkins@ci.local"
                                     git config --global user.name "Jenkins CI"
-
                                     git add ${env.TARGET_PATH}/kustomization.yaml
                                     git commit -m "chore: update image tag to ${env.IMAGE_TAG} [skip ci]"
                                     git push https://${GIT_TOKEN}@github.com/arch-hcra/st31.git HEAD:${env.BRANCH_NAME}
