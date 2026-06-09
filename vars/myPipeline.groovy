@@ -107,25 +107,25 @@ spec:
                 steps {
                     container('kaniko') {
                         script {
-
+                            // Сборка основного тега
                             sh """
                             /kaniko/executor \
                                 --context="${WORKSPACE}/app" \
                                 --dockerfile=app/Dockerfile \
                                 --destination="${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}" \
-                                --verbosity=debug \
-                                --skip-tls-verify=false  # Включите TLS в продакшене!
+                                --verbosity=debug
                             """
 
-                            // Если ветка main, то также пушим тег latest
-                            if [ "${env.BRANCH_NAME}" = "main" ]; then
+                            // Условная сборка тега latest (только для main)
+                            if (env.BRANCH_NAME == "main") {  // ✅ Корректный Groovy
+                                sh """
                                 /kaniko/executor \
                                     --context="${WORKSPACE}/app" \
                                     --dockerfile=app/Dockerfile \
                                     --destination="${env.FULL_IMAGE_NAME}:latest" \
-                                    --verbosity=debug \
-                                    --skip-tls-verify=false
-                            fi
+                                    --verbosity=debug
+                                """
+                            }
                         }
                     }
                 }
