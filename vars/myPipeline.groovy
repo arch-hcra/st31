@@ -15,26 +15,21 @@ spec:
   - name: jnlp
     image: jenkins/inbound-agent:latest
     args: ['\${JENKINS_SECRET}', '\${JENKINS_NAME}']
+    env:
+    - name: JENKINS_URL
+      value: "http://jenkins:8080"
 
   - name: python
     image: python:3.9
-    command: ['cat']
-    tty: true
+    command: ['sh', '-c', 'tail -f /dev/null']  # Заменяем cat на более корректный вариант
 
   - name: tools
     image: alpine/kubectl:latest
-    command:
-    - /bin/sh
-    - -c
-    - |
-      apk add --no-cache curl git yq
-      cat
-    tty: true
+    command: ['sh', '-c', 'sleep infinity']  # Бесконечный sleep вместо cat
 
   - name: kaniko
     image: gcr.io/kaniko-project/executor:latest
-    command: ['cat']
-    tty: true
+    command: ['/busybox/sleep', 'infinity']  # Kaniko не нужен cat, используем sleep infinity
     volumeMounts:
     - name: docker-config
       mountPath: /kaniko/.docker
@@ -84,7 +79,6 @@ spec:
                 }
             }
 
-            // Остальные stages остаются без изменений
             stage('Build & Test') {
                 steps {
                     container('python') {
@@ -103,31 +97,35 @@ spec:
                     container('kaniko') {
                         script {
                             echo "🔍 Building and pushing image: ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}"
-                            echo "🔍 Branch: ${env.BRANCH_NAME}"
 
-                            def kanikoCommand = """
-                                /kaniko/executor \
-                                --context ${WORKSPACE}/app \
-                                --dockerfile ${WORKSPACE}/app/Dockerfile \
-                                --destination ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG} \
-                                --verbosity=debug \
-                                --registry-mirror=https://mirror.gcr.io \
-                                --use-new-run \
-                                --single-snapshot
-                            """
+                            // Подготовка контекста
+                            def contextDir = "${WORKSPACE}/app"
+                            echo "🔍 Context directory: ${contextDir}"
 
-                            sh kanikoCommand
+                            // Запускаем Kaniko напрямую
+                            withEnv(["PATH+EXTRA=/kaniko/bin"]) {
+                                sh """
+                                    /kaniko/executor \
+                                    --context=${contextDir} \
+                                    --dockerfile=${contextDir}/Dockerfile \
+                                    --destination=${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG} \
+                                    --verbosity=debug \
+                                    --registry-mirror=https://mirror.gcr.io \
+                                    --use-new-run \
+                                    --single-snapshot
+                                """
+                            }
 
+                            // Если ветка main, создаем тег latest
                             if (env.BRANCH_NAME == 'main') {
                                 echo "🔍 Tagging as 'latest' for main branch..."
-                                def latestCommand = """
+                                sh """
                                     /kaniko/executor \
-                                    --context ${WORKSPACE}/app \
-                                    --dockerfile ${WORKSPACE}/app/Dockerfile \
-                                    --destination ${env.FULL_IMAGE_NAME}:latest \
+                                    --context=${contextDir} \
+                                    --dockerfile=${contextDir}/Dockerfile \
+                                    --destination=${env.FULL_IMAGE_NAME}:latest \
                                     --verbosity=debug
                                 """
-                                sh latestCommand
                             }
                         }
                     }
