@@ -6,6 +6,6 @@ resources:
 images:
   - name: PLACEHOLDER_IMAGE
     newName: docker.io/archcra/st31
-    newTag: st31-developer-23
+    newTag: st31-developer-24
 commonLabels:
   env: dev
