@@ -5,7 +5,7 @@ app = Flask(__name__)
 @app.route('/')
 def hello_world():
     return jsonify({
-        "message": "Hello my py app in k8s!",
+        "message": "Hello my py app in k8s",
         "status": "running"
     })
 
