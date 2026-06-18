@@ -133,36 +133,41 @@ spec:
                 }
             }
 
-        stage('Update Manifests') {
-            when {
-                expression { env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'developer' }
-            }
-            steps {
-                container('tools') {
-                    script {
-                        withCredentials([string(
-                            credentialsId: 'jenkins_1', 
-                            variable: 'GIT_TOKEN'
-                        )]) {
-                            sh """
-                                git clone https://${GIT_TOKEN}@github.com/arch-hcra/st31.git /tmp/infra-repo
-                                cd /tmp/infra-repo
-                                git checkout ${env.BRANCH_NAME}
-                                
-                                yq eval '.images[0].newTag = "${env.IMAGE_TAG}"' ${env.TARGET_PATH}/kustomization.yaml -i
+            stage('Update Manifests') {
+                steps {
+                    container('tools') {
+                        script {
+                            withCredentials([string(
+                                credentialsId: 'jenkins_1',
+                                variable: 'GIT_TOKEN'
+                            )]) {
+                                sh """
+                                    git clone https://${GIT_TOKEN}@github.com/arch-hcra/st31.git /tmp/infra-repo
+                                    cd /tmp/infra-repo
 
-                                git config --global user.email "jenkins@ci.local"
-                                git config --global user.name "Jenkins CI"
+                                    # Обновляем манифест
+                                    yq eval '.images[0].newTag = "${env.IMAGE_TAG}"' ${env.TARGET_PATH}/kustomization.yaml -i
 
-                                git add ${env.TARGET_PATH}/kustomization.yaml
-                                git commit -m "chore: update image tag to ${env.IMAGE_TAG} [skip ci]"
-                                git push https://${GIT_TOKEN}@github.com/arch-hcra/st31.git HEAD:${env.BRANCH_NAME}
-                            """
+                                    # Коммитим с [skip ci] (но проверяем, не от Jenkins ли коммит)
+                                    git config --global user.email "jenkins@ci.local"
+                                    git config --global user.name "Jenkins"
+                                    git add ${env.TARGET_PATH}/kustomization.yaml
+                                    git commit -m "chore: update image tag to ${env.IMAGE_TAG} [skip ci]"
+
+                                    # Проверка: если последний коммит — от Jenkins, то не пушить (чтобы избежать цикла)
+                                    if git log -1 --pretty=format:"%an" | grep -q "Jenkins"; then
+                                        echo "⚠️ Цикл обнаружен! Коммит от Jenkins. Push отменён."
+                                        exit 0
+                                    fi
+
+                                    git push https://${GIT_TOKEN}@github.com/arch-hcra/st31.git HEAD:${env.BRANCH_NAME}
+                                """
+                            }
                         }
                     }
                 }
-            }
 }
+
 
         }
     }
