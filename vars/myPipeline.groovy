@@ -44,7 +44,7 @@ spec:
         environment {
             GIT_CREDENTIALS_ID = 'jenkins_1'
             // Параметр для защиты от бесконечных вебхуков
-            SKIP_WEBHOOK_PROCESSING = configParams.SKIP_WEBHOOK_PROCESSING ?: false
+            SKIP_WEBHOOK_PROCESSING = (configParams?.SKIP_WEBHOOK_PROCESSING ?: false).toString()
         }
 
         stages {
@@ -132,6 +132,7 @@ spec:
                 }
             }
 
+ 
             stage('Update Manifests') {
                 when {
                     expression { env.BRANCH_NAME == 'developer' }
@@ -143,8 +144,10 @@ spec:
                                 credentialsId: 'jenkins_1',
                                 variable: 'GIT_TOKEN'
                             )]) {
-                                // Проверяем, не запущен ли мы уже в этом потоке
-                                if (env.SKIP_WEBHOOK_PROCESSING) {
+                                // Проверяем параметр конфигурации правильно
+                                def skipProcessing = (configParams?.SKIP_WEBHOOK_PROCESSING ?: false).toString()
+
+                                if (skipProcessing == 'true') {
                                     echo "Skipping manifest update (already processed by webhook)"
                                     return
                                 }
