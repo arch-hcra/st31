@@ -133,42 +133,34 @@ spec:
                 }
             }
 
-            stage('Update Manifests') {
-                steps {
-                    container('tools') {
-                        script {
-                            withCredentials([string(
-                                credentialsId: 'jenkins_1',
-                                variable: 'GIT_TOKEN'
-                            )]) {
-                                sh """
-                                    git clone https://${GIT_TOKEN}@github.com/arch-hcra/st31.git /tmp/infra-repo
-                                    cd /tmp/infra-repo
+        stage('Update Manifests') {
+            when {
+                expression { env.BRANCH_NAME == 'developer' }  // Работаем только с developer
+            }
+            steps {
+                container('tools') {
+                    withCredentials([string(credentialsId: 'jenkins_1', variable: 'GIT_TOKEN')]) {
+                        sh """
+                            git clone https://\${GIT_TOKEN}@github.com/arch-hcra/st31.git /tmp/infra-repo
+                            cd /tmp/infra-repo
 
-                                    # Обновляем манифест
-                                    yq eval '.images[0].newTag = "${env.IMAGE_TAG}"' ${env.TARGET_PATH}/kustomization.yaml -i
+                            # Обновляем тег в kustomization.yaml (только в developer)
+                            yq eval '.images[0].newTag = "${env.IMAGE_TAG}"' ${env.TARGET_PATH}/kustomization.yaml -i
 
-                                    # Коммитим с [skip ci] (но проверяем, не от Jenkins ли коммит)
-                                    git config --global user.email "jenkins@ci.local"
-                                    git config --global user.name "Jenkins"
-                                    git add ${env.TARGET_PATH}/kustomization.yaml
-                                    git commit -m "chore: update image tag to ${env.IMAGE_TAG} [skip ci]"
+                            git config --global user.email "jenkins@ci.local"
+                            git config --global user.name "Jenkins"
 
-                                    # Проверка: если последний коммит — от Jenkins, то не пушить (чтобы избежать цикла)
-                                    if git log -1 --pretty=format:"%an" | grep -q "Jenkins"; then
-                                        echo "⚠️ Цикл обнаружен! Коммит от Jenkins. Push отменён."
-                                        exit 0
-                                    fi
+                            # Коммитим только в developer с [skip ci]
+                            git checkout developer
+                            git add ${env.TARGET_PATH}/kustomization.yaml
+                            git commit -m "chore: update image tag to ${env.IMAGE_TAG} [skip ci]"
 
-                                    git push https://${GIT_TOKEN}@github.com/arch-hcra/st31.git HEAD:${env.BRANCH_NAME}
-                                """
-                            }
-                        }
+                            # Пушим только в developer
+                            git push https://\${GIT_TOKEN}@github.com/arch-hcra/st31.git HEAD:developer
+                        """
                     }
                 }
-}
-
-
+            }
         }
     }
 }
