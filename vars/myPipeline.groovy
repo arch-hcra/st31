@@ -135,33 +135,35 @@ spec:
 
         stage('Update Manifests') {
             when {
-                expression { env.BRANCH_NAME == 'developer' }  // Работаем только с developer
+                expression { env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'developer' }
             }
             steps {
                 container('tools') {
-                    withCredentials([string(credentialsId: 'jenkins_1', variable: 'GIT_TOKEN')]) {
-                        sh """
-                            git clone https://\${GIT_TOKEN}@github.com/arch-hcra/st31.git /tmp/infra-repo
-                            cd /tmp/infra-repo
+                    script {
+                        withCredentials([string(
+                            credentialsId: 'jenkins_1', 
+                            variable: 'GIT_TOKEN'
+                        )]) {
+                            sh """
+                                git clone https://${GIT_TOKEN}@github.com/arch-hcra/st31.git /tmp/infra-repo
+                                cd /tmp/infra-repo
+                                git checkout ${env.BRANCH_NAME}
+                                
+                                yq eval '.images[0].newTag = "${env.IMAGE_TAG}"' ${env.TARGET_PATH}/kustomization.yaml -i
 
-                            # Обновляем тег в kustomization.yaml (только в developer)
-                            yq eval '.images[0].newTag = "${env.IMAGE_TAG}"' ${env.TARGET_PATH}/kustomization.yaml -i
+                                git config --global user.email "jenkins@ci.local"
+                                git config --global user.name "Jenkins CI"
 
-                            git config --global user.email "jenkins@ci.local"
-                            git config --global user.name "Jenkins"
-
-                            # Коммитим только в developer с [skip ci]
-                            git checkout developer
-                            git add ${env.TARGET_PATH}/kustomization.yaml
-                            git commit -m "chore: update image tag to ${env.IMAGE_TAG} [skip ci]"
-
-                            # Пушим только в developer
-                            git push https://\${GIT_TOKEN}@github.com/arch-hcra/st31.git HEAD:developer
-                        """
+                                git add ${env.TARGET_PATH}/kustomization.yaml
+                                git commit -m "chore: update image tag to ${env.IMAGE_TAG} [skip ci]"
+                                git push https://${GIT_TOKEN}@github.com/arch-hcra/st31.git HEAD:${env.BRANCH_NAME}
+                            """
+                        }
                     }
                 }
             }
+}
+
         }
     }
-}
 }
