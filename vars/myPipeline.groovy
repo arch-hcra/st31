@@ -43,6 +43,8 @@ spec:
 
         environment {
             GIT_CREDENTIALS_ID = 'jenkins_1'
+            // Параметр для защиты от бесконечных вебхуков
+            SKIP_WEBHOOK_PROCESSING = configParams.SKIP_WEBHOOK_PROCESSING ?: false
         }
 
         stages {
@@ -50,11 +52,14 @@ spec:
                 steps {
                     container('jnlp') {
                         script {
-
                             checkout scm
 
-                            env.BRANCH_NAME = env.BRANCH_NAME ?: 'developer'
+                            // Блокируем выполнение для main ветки
+                            if (env.BRANCH_NAME == 'main') {
+                                error("Manual merge required for main branch!")
+                            }
 
+                            env.BRANCH_NAME = env.BRANCH_NAME ?: 'developer'
 
                             def configFile = "${WORKSPACE}/app/.ci-config.yaml"
                             if (!fileExists(configFile)) {
@@ -67,15 +72,16 @@ spec:
                                 error("Invalid config: 'appName' is required!")
                             }
 
-  
                             env.FULL_IMAGE_NAME = cfg.dockerImage ?: "docker.io/archcra/${cfg.appName}"
                             env.REPO_URL = cfg.infraRepoUrl ?: 'https://github.com/arch-hcra/st31.git'
                             env.TARGET_PATH = cfg.infraRepoTargetPath ?: 'app-infra/overlays/dev'
                             env.APP_NAME = cfg.appName
 
+                            env.IMAGE_TAG = "${env.APP_NAME}-${env.BRANCH_NAME}-${env.BUILD_NUMBER}"
+                            if (env.BRANCH_NAME == 'developer') {
+                                env.IMAGE_TAG = "${env.APP_NAME}-dev-${env.BUILD_NUMBER}"
+                            }
 
-                            env.IMAGE_TAG = env.BRANCH_NAME == 'main' ? 'latest' : "${env.APP_NAME}-${env.BRANCH_NAME}-${env.BUILD_NUMBER}"
-                            
                             echo "=== CONFIG LOADED ==="
                             echo "Image: ${env.FULL_IMAGE_NAME}"
                             echo "Tag: ${env.IMAGE_TAG}"
@@ -91,7 +97,7 @@ spec:
                             python3 -m venv venv
                             . venv/bin/activate
                             pip install --default-timeout=120 -r app/requirements.txt
-                            pytest app/test/test_app.py
+                            pytest app/test/test_app.py || exit 1
                         '''
                     }
                 }
@@ -120,50 +126,70 @@ spec:
                                     echo \${DOCKER_PASS} | docker login -u \${DOCKER_USER} --password-stdin
                                     docker push ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}
                                 """
-                                
-                                if (env.BRANCH_NAME == 'main') {
-                                    sh """
-                                        docker tag ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG} ${env.FULL_IMAGE_NAME}:latest
-                                        docker push ${env.FULL_IMAGE_NAME}:latest
-                                    """
-                                }
                             }
                         }
                     }
                 }
             }
 
-        stage('Update Manifests') {
-            when {
-                expression { env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'developer' }
-            }
-            steps {
-                container('tools') {
-                    script {
-                        withCredentials([string(
-                            credentialsId: 'jenkins_1', 
-                            variable: 'GIT_TOKEN'
-                        )]) {
-                            sh """
-                                git clone https://${GIT_TOKEN}@github.com/arch-hcra/st31.git /tmp/infra-repo
-                                cd /tmp/infra-repo
-                                git checkout ${env.BRANCH_NAME}
-                                
-                                yq eval '.images[0].newTag = "${env.IMAGE_TAG}"' ${env.TARGET_PATH}/kustomization.yaml -i
+            stage('Update Manifests') {
+                when {
+                    expression { env.BRANCH_NAME == 'developer' }
+                }
+                steps {
+                    container('tools') {
+                        script {
+                            withCredentials([string(
+                                credentialsId: 'jenkins_1',
+                                variable: 'GIT_TOKEN'
+                            )]) {
+                                // Проверяем, не запущен ли мы уже в этом потоке
+                                if (env.SKIP_WEBHOOK_PROCESSING) {
+                                    echo "Skipping manifest update (already processed by webhook)"
+                                    return
+                                }
 
-                                git config --global user.email "jenkins@ci.local"
-                                git config --global user.name "Jenkins CI"
+                                // Клонируем репозиторий
+                                sh "git clone https://${GIT_TOKEN}@github.com/arch-hcra/st31.git /tmp/infra-repo"
 
-                                git add ${env.TARGET_PATH}/kustomization.yaml
-                                git commit -m "chore: update image tag to ${env.IMAGE_TAG} [skip ci]"
-                                git push https://${GIT_TOKEN}@github.com/arch-hcra/st31.git HEAD:${env.BRANCH_NAME}
-                            """
+                                // Проверяем текущий тег в kustomization
+                                def currentTag = sh(script: "cd /tmp/infra-repo && yq eval '.images[0].newTag' ${env.TARGET_PATH}/kustomization.yaml", returnStdout: true).trim()
+
+                                // Если тег уже обновлён - не делаем ничего
+                                if (currentTag == env.IMAGE_TAG) {
+                                    echo "Image tag already up to date in manifests"
+                                    return
+                                }
+
+                                // Обновляем тег
+                                sh """
+                                    cd /tmp/infra-repo
+                                    git checkout ${env.BRANCH_NAME}
+
+                                    yq eval '.images[0].newTag = \"${env.IMAGE_TAG}\"' ${env.TARGET_PATH}/kustomization.yaml -i
+
+                                    git config --global user.email "jenkins@ci.local"
+                                    git config --global user.name "Jenkins CI"
+
+                                    git add ${env.TARGET_PATH}/kustomization.yaml
+                                    git diff --cached --quiet || git commit -m "chore: update image tag to ${env.IMAGE_TAG}"
+                                """
+
+                                // Проверяем, были ли изменения
+                                def changes = sh(script: "cd /tmp/infra-repo && git diff --name-only", returnStdout: true).trim()
+                                if (changes) {
+                                    sh """
+                                        cd /tmp/infra-repo
+                                        git push https://${GIT_TOKEN}@github.com/arch-hcra/st31.git HEAD:${env.BRANCH_NAME}
+                                    """
+                                } else {
+                                    echo "No changes detected in manifests"
+                                }
+                            }
                         }
                     }
                 }
             }
-}
-
         }
     }
 }
