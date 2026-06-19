@@ -13,7 +13,7 @@ def test_hello_world():
     assert response.status_code == 200
     
     data = response.get_json()
-    assert data["message"] == "Hello my py app in k8s"
+    assert data["message"] == "Hello my py app my k8s"
 
 def test_health():
     client = app.test_client()
