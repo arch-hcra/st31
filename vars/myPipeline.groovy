@@ -4,40 +4,25 @@ def call(Map configParams) {
             kubernetes {
                 defaultContainer 'jnlp'
                 yaml """
-apiVersion: v1
-kind: Pod
-metadata:
-  labels:
-    jenkins: agent
-spec:
-  serviceAccountName: default
-  containers:
-  - name: jnlp
-    image: jenkins/inbound-agent:latest
-    args: ['\$(JENKINS_SECRET)', '\$(JENKINS_NAME)']
-
-  - name: dind
-    image: docker:dind
-    command: ['dockerd-entrypoint.sh']
-    args: ['--tls=false']
-    securityContext:
-      privileged: true
-
-  - name: python
-    image: python:3.9
-    command: ['cat']
-    tty: true
-
-  - name: tools
-    image: alpine/kubectl:latest
-    command:
-    - /bin/sh
-    - -c
-    - |
-      apk add --no-cache curl git yq
-      cat
-    tty: true
-"""
+                apiVersion: v1
+                kind: Pod
+                metadata:
+                  labels:
+                    jenkins: agent
+                spec:
+                  serviceAccountName: default
+                  containers:
+                  - name: jnlp
+                    image: jenkins/inbound-agent:latest
+                    args: ['\$(JENKINS_SECRET)', '\$(JENKINS_NAME)']
+                  - name: multi-tools
+                    image: alpine/kubectl:latest
+                    command: ['cat']
+                    tty: true
+                    env:
+                      - name: PATH
+                        value: "/root/.local/bin:${PATH}"
+                """
             }
         }
 
@@ -133,37 +118,59 @@ spec:
                 }
             }
 
-        stage('Update Manifests') {
-            when {
-                expression { env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'developer' }
+            stage('Plan & Validate') {
+                when {
+                    expression { env.BRANCH_NAME == 'main' }
+                }
+                steps {
+                    container('multi-tools') {
+                        sh '''
+                            apk add --no-cache git yq curl
+                            git clone https://${GIT_TOKEN}@github.com/arch-hra/st31.git /tmp/infra-repo
+                            cd /tmp/infra-repo
+                            git checkout ${env.BRANCH_NAME}
+
+                            # Безопасная подстановка тега
+                            yq eval '.images[0].newTag = "'"${env.IMAGE_TAG}"'"' ${env.TARGET_PATH}/kustomization.yaml -i
+
+                            # Показать разницу
+                            kubectl diff -k ${env.TARGET_PATH} | tee changes.log
+
+                            # Approval для main
+                            if [[ $(grep -c "Change:" changes.log) -gt 0 ]]; then
+                              timeout(time: 1, unit: 'HOURS') {
+                                input message: 'Approve manifest changes?', ok: 'Deploy'
+                              }
+                            fi
+                        '''
+                    }
+                }
             }
-            steps {
-                container('tools') {
-                    script {
-                        withCredentials([string(
-                            credentialsId: 'jenkins_1', 
-                            variable: 'GIT_TOKEN'
-                        )]) {
-                            sh """
-                                git clone https://${GIT_TOKEN}@github.com/arch-hcra/st31.git /tmp/infra-repo
-                                cd /tmp/infra-repo
-                                git checkout ${env.BRANCH_NAME}
-                                
-                                yq eval '.images[0].newTag = "${env.IMAGE_TAG}"' ${env.TARGET_PATH}/kustomization.yaml -i
 
-                                git config --global user.email "jenkins@ci.local"
-                                git config --global user.name "Jenkins CI"
+            stage('Update Manifests') {
+                when {
+                    expression { env.BRANCH_NAME == 'main' && env.BUILD_ID == 'initial' }
+                }
+                steps {
+                    container('multi-tools') {
+                        script {
+                            withCredentials([string(credentialsId: 'jenkins_1', variable: 'GIT_TOKEN')]) {
+                                sh """
+                                    git clone https://${GIT_TOKEN}@github.com/arch-hcra/st31.git /tmp/infra-repo
+                                    cd /tmp/infra-repo
 
-                                git add ${env.TARGET_PATH}/kustomization.yaml
-                                git commit -m "chore: update image tag to ${env.IMAGE_TAG} [skip ci]"
-                                git push https://${GIT_TOKEN}@github.com/arch-hcra/st31.git HEAD:${env.BRANCH_NAME}
-                            """
+                                    if ! git log -1 --pretty=%B | grep -q "skip ci"; then
+                                        yq eval '.images[0].newTag = "${env.IMAGE_TAG}"' ${env.TARGET_PATH}/kustomization.yaml -i
+                                        git add ${env.TARGET_PATH}/kustomization.yaml
+                                        git commit -m "chore: update image tag to ${env.IMAGE_TAG} [skip ci]"
+                                        git push https://${GIT_TOKEN}@github.com/arch-hcra/st31.git HEAD:${env.BRANCH_NAME}
+                                    fi
+                                """
+                            }
                         }
                     }
                 }
             }
-}
-
         }
     }
 }
