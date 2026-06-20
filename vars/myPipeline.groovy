@@ -156,7 +156,7 @@ spec:
 
                                 git add ${env.TARGET_PATH}/kustomization.yaml
                                 git commit -m "chore: update image tag to ${env.IMAGE_TAG}"
-                                git push "https://${GIT_TOKEN}@github.com/arch-hcra/st31.git HEAD:${env.BRANCH_NAME} [skip ci]"
+                                git push https://${GIT_TOKEN}@github.com/arch-hcra/st31.git HEAD:${env.BRANCH_NAME} || exit 1
                             """
                         }
                     }
