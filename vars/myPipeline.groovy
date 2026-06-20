@@ -2,32 +2,44 @@ def call(Map configParams) {
     pipeline {
         agent {
             kubernetes {
-
                 defaultContainer 'jnlp'
                 yaml """
-                apiVersion: v1
-                kind: Pod
-                metadata:
-                  labels:
-                    jenkins: agent
-                spec:
-                  serviceAccountName: default
-                  containers:
-                  - name: jnlp
-                    image: jenkins/inbound-agent:latest
-                    args: ['\$(JENKINS_SECRET)', '\$(JENKINS_NAME)']
-                  - name: multi-tools
-                    image: alpine/kubectl:latest
-                    command: ['cat']
-                    tty: true
-                    env:
-                      - name: PATH
-                        value: "/root/.local/bin:${PATH}"
-                """
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    jenkins: agent
+spec:
+  serviceAccountName: default
+  containers:
+  - name: jnlp
+    image: jenkins/inbound-agent:latest
+    args: ['\$(JENKINS_SECRET)', '\$(JENKINS_NAME)']
+
+  - name: dind
+    image: docker:dind
+    command: ['dockerd-entrypoint.sh']
+    args: ['--tls=false']
+    securityContext:
+      privileged: true
+
+  - name: python
+    image: python:3.9
+    command: ['cat']
+    tty: true
+
+  - name: tools
+    image: alpine/kubectl:latest
+    command:
+    - /bin/sh
+    - -c
+    - |
+      apk add --no-cache curl git yq
+      cat
+    tty: true
+"""
             }
         }
-            }
-        
 
         environment {
             GIT_CREDENTIALS_ID = 'jenkins_1'
@@ -121,39 +133,24 @@ def call(Map configParams) {
                 }
             }
 
-        stage('Update Manifests') {
-            when {
-                expression { env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'developer' }
-            }
-            steps {
-                container('tools') {
-                    script {
-                        withCredentials([string(
-                            credentialsId: 'jenkins_1', 
-                            variable: 'GIT_TOKEN'
-                        )]) {
-                            sh """
+            stage('Update Manifests') {
+                steps {
+                    container('tools') {
+                        withCredentials([string(credentialsId: 'jenkins_1', variable: 'GIT_TOKEN')]) {
+                            sh '''
                                 git clone https://${GIT_TOKEN}@github.com/arch-hcra/st31.git /tmp/infra-repo
                                 cd /tmp/infra-repo
-                                git checkout ${env.BRANCH_NAME}
-                                
                                 yq eval '.images[0].newTag = "${env.IMAGE_TAG}"' ${env.TARGET_PATH}/kustomization.yaml -i
-
-                                git config --global user.email "jenkins@ci.local"
-                                git config --global user.name "Jenkins CI"
-
                                 git add ${env.TARGET_PATH}/kustomization.yaml
                                 git commit -m "chore: update image tag to ${env.IMAGE_TAG} [skip ci]"
                                 git push https://${GIT_TOKEN}@github.com/arch-hcra/st31.git HEAD:${env.BRANCH_NAME}
-                            """
+                            '''
                         }
                     }
                 }
             }
+
+
         }
-        
     }
-
 }
-
-    
