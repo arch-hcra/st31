@@ -148,7 +148,7 @@ spec:
                             sh """
                                 git clone https://${GIT_TOKEN}@github.com/arch-hcra/st31.git /tmp/infra-repo
                                 cd /tmp/infra-repo
-                                git checkout ${env.BRANCH_NAME}
+                                git checkout \${env.BRANCH_NAME}
 
                                 # Проверяем, совпадает ли уже тег в файле
                                 CURRENT_TAG=$(yq eval '.images[0].newTag' ${env.TARGET_PATH}/kustomization.yaml 2>/dev/null || echo "")
