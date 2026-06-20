@@ -1,6 +1,7 @@
-pipeline {
-    agent {
-        kubernetes {
+def call(Map configParams) {
+    pipeline {
+        agent {
+            kubernetes {
             defaultContainer 'jnlp'
             yaml """
 apiVersion: v1
@@ -188,4 +189,6 @@ spec:
             sh "rm -rf ${WORKSPACE}/venv /tmp/infra-repo ${env.ARTIFACT_IMAGE_TAR} ${env.TRIVY_REPORT}"
         }
     }
+}
+
 }
