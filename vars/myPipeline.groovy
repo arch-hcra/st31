@@ -35,32 +35,27 @@ spec:
         }
     }
 
-    // === ОБЩИЙ БЛОК ПЕРЕМЕННЫХ ===
     environment {
         // --- Git ---
         GIT_TOKEN = credentials('jenkins_1')
         GIT_EMAIL = "jenkins@ci.local"
         GIT_USER = "Jenkins CI"
         GIT_REPO_URL = "https://github.com/arch-hcra/st31.git"
-        GIT_BRANCH = env.BRANCH_NAME ?: 'developer'
 
         // --- Docker ---
         DOCKER_REGISTRY = "docker.io"
         DOCKER_CREDENTIALS = credentials('docker_token_1')
-        DOCKER_IMAGE_NAME = "archcra/my-app"  // Базовое имя образа (без тега)
+        DOCKER_IMAGE_NAME = "archcra/my-app"
         DOCKERFILE_PATH = "app/Dockerfile"
         CONTEXT_DIR = "app"
 
         // --- Config ---
         CONFIG_FILE = "app/.ci-config.yaml"
-        TARGET_PATH = "app-infra/overlays/dev"  // Путь к kustomization.yaml
+        TARGET_PATH = "app-infra/overlays/dev"
 
         // --- Trivy ---
         TRIVY_SEVERITY = "CRITICAL"
         TRIVY_REPORT = "trivy-report.json"
-
-        // --- Artifacts ---
-        ARTIFACT_IMAGE_TAR = "${DOCKER_IMAGE_NAME}-${GIT_BRANCH}-${env.BUILD_NUMBER}.tar"
     }
 
     stages {
@@ -70,7 +65,10 @@ spec:
                     script {
                         checkout scm
 
-                        // Загружаем конфиг и переопределяем переменные, если нужно
+                        // Определяем GIT_BRANCH
+                        env.GIT_BRANCH = env.BRANCH_NAME ?: 'developer'
+
+                        // Загружаем конфиг
                         def cfg = readYaml file: "${env.CONFIG_FILE}"
                         env.DOCKER_IMAGE_NAME = cfg.dockerImage ?: env.DOCKER_IMAGE_NAME
                         env.TARGET_PATH = cfg.infraRepoTargetPath ?: env.TARGET_PATH
@@ -151,7 +149,7 @@ spec:
                     script {
                         withCredentials([string(credentialsId: 'jenkins_1', variable: 'GIT_TOKEN')]) {
                             sh """
-                                git clone https://${GIT_TOKEN}@github.com/arch-hcra/st31.git /tmp/infra-repo
+                                git clone https://${GIT_TOKEN}@${env.GIT_REPO_URL} /tmp/infra-repo
                                 cd /tmp/infra-repo
                                 git checkout ${env.GIT_BRANCH}
                                 yq eval '.images[0].newTag = \"${env.IMAGE_TAG}\"' ${env.TARGET_PATH}/kustomization.yaml -i
