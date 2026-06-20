@@ -133,29 +133,41 @@ spec:
                 }
             }
 
-            stage('Update Manifests') {
-                steps {
-                    container('tools') {
-                        withCredentials([string(credentialsId: 'jenkins_1', variable: 'GIT_TOKEN')]) {
-                            sh """
-                                # Клонируем репозиторий
-                                git clone https://${env.GIT_TOKEN}@github.com/arch-hcra/st31.git /tmp/infra-repo || exit 1
+        stage('Update & Push') {
+            steps {
+                container('tools') {
+                    withCredentials([string(credentialsId: 'GIT_TOKEN', variable: 'TOKEN')]) {
+                        sh """
+                            set -ex
+                            git clone https://\${TOKEN}@github.com/arch-hcra/st31.git /tmp/repo || exit 1
+                            cd /tmp/repo || exit 1
 
-                                # Переходим в директорию и обновляем манифест
-                                cd /tmp/infra-repo || exit 1
-                                yq eval '.images[0].newTag = \"${env.IMAGE_TAG}\"' "${env.TARGET_PATH}/kustomization.yaml" -i || exit 1
+                            # Обновляем манифест
+                            yq eval '.images[0].newTag = "st31-developer-103"' app-infra/overlays/dev/kustomization.yaml -i || exit 1
 
-                                # Коммитим и пушим изменения
-                                git config --global user.email "jenkins@example.com"
-                                git config --global user.name "Jenkins Bot"
-                                git add "${env.TARGET_PATH}/kustomization.yaml" || exit 1
-                                git commit -m "chore: update image tag to ${env.IMAGE_TAG} [skip ci]" || exit 1
-                                git push origin HEAD:${env.BRANCH_NAME} || exit 1
-                            """
-                        }
+                            # Настраиваем git
+                            git config --local user.email "jenkins@example.com"
+                            git config --local user.name "Jenkins Bot"
+
+                            # Синхронизируем ветку
+                            git checkout developer || exit 1
+                            git fetch origin || exit 1
+                            git pull --rebase origin developer || {
+                                echo "Конфликты при rebase. Применяем изменения 'theirs'."
+                                git checkout --theirs app-infra/overlays/dev/kustomization.yaml || exit 1
+                                git add app-infra/overlays/dev/kustomization.yaml || exit 1
+                                git rebase --continue || exit 1
+                            }
+
+                            # Коммитим и пушим
+                            git commit -m "chore: update image tag [skip ci]" || exit 1
+                            git push origin developer || exit 1
+                        """
                     }
                 }
             }
+        }
+    
 
 
         }
