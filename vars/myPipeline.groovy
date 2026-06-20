@@ -153,7 +153,7 @@ spec:
                                     cp ${env.TARGET_PATH}/kustomization.yaml kustomization.bak
 
                                     # Применяем изменения
-                                    yq eval '.images[0].newTag = "${env.IMAGE_TAG}"' ${env.TARGET_PATH}/kustomization.yaml -i
+                                    yq eval '.images[0].newTag = "\${env.IMAGE_TAG}"' ${env.TARGET_PATH}/kustomization.yaml -i
 
                                     # Проверяем, изменился ли файл (исправленный вариант)
                                     if [ "$(git diff --no-index kustomization.bak ${env.TARGET_PATH}/kustomization.yaml)" = "" ]; then
