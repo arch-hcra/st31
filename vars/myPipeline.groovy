@@ -133,42 +133,36 @@ spec:
                 }
             }
 
-        stage('Update & Push') {
+        stage('Update Manifests') {
+            when {
+                expression { env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'developer' }
+            }
             steps {
                 container('tools') {
-                    withCredentials([string(credentialsId: 'GIT_TOKEN', variable: 'TOKEN')]) {
-                        sh """
-                            set -ex
-                            git clone https://\${TOKEN}@github.com/arch-hcra/st31.git /tmp/repo || exit 1
-                            cd /tmp/repo || exit 1
+                    script {
+                        withCredentials([string(
+                            credentialsId: 'jenkins_1', 
+                            variable: 'GIT_TOKEN'
+                        )]) {
+                            sh """
+                                git clone https://${GIT_TOKEN}@github.com/arch-hcra/st31.git /tmp/infra-repo
+                                cd /tmp/infra-repo
+                                git checkout ${env.BRANCH_NAME}
+                                
+                                yq eval '.images[0].newTag = "${env.IMAGE_TAG}"' ${env.TARGET_PATH}/kustomization.yaml -i
 
-                            # Обновляем манифест
-                            yq eval '.images[0].newTag = "st31-developer-103"' app-infra/overlays/dev/kustomization.yaml -i || exit 1
+                                git config --global user.email "jenkins@ci.local"
+                                git config --global user.name "Jenkins CI"
 
-                            # Настраиваем git
-                            git config --local user.email "jenkins@example.com"
-                            git config --local user.name "Jenkins Bot"
-
-                            # Синхронизируем ветку
-                            git checkout developer || exit 1
-                            git fetch origin || exit 1
-                            git pull --rebase origin developer || {
-                                echo "Конфликты при rebase. Применяем изменения 'theirs'."
-                                git checkout --theirs app-infra/overlays/dev/kustomization.yaml || exit 1
-                                git add app-infra/overlays/dev/kustomization.yaml || exit 1
-                                git rebase --continue || exit 1
-                            }
-
-                            # Коммитим и пушим
-                            git commit -m "chore: update image tag [skip ci]" || exit 1
-                            git push origin developer || exit 1
-                        """
+                                git add ${env.TARGET_PATH}/kustomization.yaml
+                                git commit -m "chore: update image tag to ${env.IMAGE_TAG}
+                                git push https://${GIT_TOKEN}@github.com/arch-hcra/st31.git HEAD:${env.BRANCH_NAME} [skip ci]"
+                            """
+                        }
                     }
                 }
             }
-        }
-    
-
+}
 
         }
     }
