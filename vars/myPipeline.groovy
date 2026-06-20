@@ -27,7 +27,7 @@ def call(Map configParams) {
             }
         }
             }
-        }
+        
 
         environment {
             GIT_CREDENTIALS_ID = 'jenkins_1'
@@ -150,8 +150,10 @@ def call(Map configParams) {
                     }
                 }
             }
+        }
+        
+    }
+
 }
 
-        }
-    }
-}
+    
