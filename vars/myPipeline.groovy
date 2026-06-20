@@ -3,7 +3,7 @@ def call(Map configParams) {
         agent {
             kubernetes {
             defaultContainer 'jnlp'
-            yaml """
+                yaml """
 apiVersion: v1
 kind: Pod
 metadata:
@@ -15,22 +15,27 @@ spec:
   - name: jnlp
     image: jenkins/inbound-agent:latest
     args: ['\$(JENKINS_SECRET)', '\$(JENKINS_NAME)']
-  - name: buildkit
-    image: docker:24.0.7-dind
+
+  - name: dind
+    image: docker:dind
     command: ['dockerd-entrypoint.sh']
     args: ['--tls=false']
-    env:
-    - name: DOCKER_BUILDKIT
-      value: "1"
     securityContext:
-      privileged: false
+      privileged: true
+
   - name: python
     image: python:3.9
     command: ['cat']
     tty: true
+
   - name: tools
     image: alpine/kubectl:latest
-    command: ['/bin/sh', '-c', 'apk add --no-cache curl git yq trivy && cat']
+    command:
+    - /bin/sh
+    - -c
+    - |
+      apk add --no-cache curl git yq
+      cat
     tty: true
 """
         }
