@@ -134,52 +134,28 @@ spec:
             }
 
             stage('Update Manifests') {
-                when {
-                    expression { env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'developer' }
-                }
                 steps {
                     container('tools') {
-                        script {
-                            withCredentials([string(
-                                credentialsId: 'jenkins_1',
-                                variable: 'GIT_TOKEN'
-                            )]) {
-                                // Используем `withEnv` для безопасной передачи переменных в sh
-                                withEnv(["PATH+EXTRA=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"]) {
-                                    sh """
-                                        set -eux  # Включаем отладочные выводы
+                        withCredentials([string(credentialsId: 'jenkins_1', variable: 'GIT_TOKEN')]) {
+                            sh """
+                                # Клонируем репозиторий
+                                git clone https://${env.GIT_TOKEN}@github.com/arch-hcra/st31.git /tmp/infra-repo || exit 1
 
-                                        # Клонируем репозиторий (без интерполяции ${GIT_TOKEN})
-                                        git clone https://\${GIT_TOKEN}@github.com/arch-hcra/st31.git /tmp/infra-repo
-                                        cd /tmp/infra-repo
-                                        git checkout ${env.BRANCH_NAME}
+                                # Переходим в директорию и обновляем манифест
+                                cd /tmp/infra-repo || exit 1
+                                yq eval '.images[0].newTag = \"${env.IMAGE_TAG}\"' "${env.TARGET_PATH}/kustomization.yaml" -i || exit 1
 
-                                        # Копируем файл (используем env.VAR напрямую)
-                                        cp ${env.TARGET_PATH}/kustomization.yaml kustomization.bak
-
-                                        # Обновляем тег (исправлено: экранируем переменные)
-                                        yq eval '.images[0].newTag = "\${env.IMAGE_TAG}"' ${env.TARGET_PATH}/kustomization.yaml -i
-
-                                        # Проверяем изменения (исправлено: используем env.VAR)
-                                        if [ "\$(git diff --no-index kustomization.bak ${env.TARGET_PATH}/kustomization.yaml)" = "" ]; then
-                                            echo "No changes detected, skipping commit"
-                                            exit 0
-                                        fi
-
-                                        # Настраиваем git и коммитим
-                                        git config --global user.email "jenkins@ci.local"
-                                        git config --global user.name "Jenkins CI"
-                                        git add ${env.TARGET_PATH}/kustomization.yaml
-                                        git commit -m "chore: update image tag to ${env.IMAGE_TAG} [skip ci]"
-                                        git push https://\${GIT_TOKEN}@github.com/arch-hcra/st31.git HEAD:${env.BRANCH_NAME}
-                                    """
-                                }
-                            }
+                                # Коммитим и пушим изменения
+                                git config --global user.email "jenkins@example.com"
+                                git config --global user.name "Jenkins Bot"
+                                git add "${env.TARGET_PATH}/kustomization.yaml" || exit 1
+                                git commit -m "chore: update image tag to ${env.IMAGE_TAG} [skip ci]" || exit 1
+                                git push origin HEAD:${env.BRANCH_NAME} || exit 1
+                            """
                         }
                     }
                 }
-}
-
+            }
 
 
         }
