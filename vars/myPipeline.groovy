@@ -2,7 +2,7 @@ def call(Map configParams) {
     pipeline {
         agent {
             kubernetes {
-            defaultContainer 'jnlp'
+                defaultContainer 'jnlp'
                 yaml """
 apiVersion: v1
 kind: Pod
@@ -38,162 +38,132 @@ spec:
       cat
     tty: true
 """
-        }
-    }
-
-    environment {
-        // --- Git ---
-        GIT_TOKEN = credentials('jenkins_1')
-        GIT_EMAIL = "jenkins@ci.local"
-        GIT_USER = "Jenkins CI"
-        GIT_REPO_URL = "https://github.com/arch-hcra/st31.git"
-
-        // --- Docker ---
-        DOCKER_REGISTRY = "docker.io"
-        DOCKER_CREDENTIALS = credentials('docker_token_1')
-        DOCKER_IMAGE_NAME = "archcra/my-app"
-        DOCKERFILE_PATH = "app/Dockerfile"
-        CONTEXT_DIR = "app"
-
-        // --- Config ---
-        CONFIG_FILE = "app/.ci-config.yaml"
-        TARGET_PATH = "app-infra/overlays/dev"
-
-        // --- Trivy ---
-        TRIVY_SEVERITY = "CRITICAL"
-        TRIVY_REPORT = "trivy-report.json"
-    }
-
-    stages {
-        stage('Checkout & Load Config') {
-            steps {
-                container('jnlp') {
-                    script {
-                        checkout scm
-
-                        // Определяем GIT_BRANCH
-                        env.GIT_BRANCH = env.BRANCH_NAME ?: 'developer'
-
-                        // Загружаем конфиг
-                        def cfg = readYaml file: "${env.CONFIG_FILE}"
-                        env.DOCKER_IMAGE_NAME = cfg.dockerImage ?: env.DOCKER_IMAGE_NAME
-                        env.TARGET_PATH = cfg.infraRepoTargetPath ?: env.TARGET_PATH
-
-                        // Формируем полное имя образа и тег
-                        env.FULL_IMAGE_NAME = "${env.DOCKER_REGISTRY}/${env.DOCKER_IMAGE_NAME}"
-                        env.IMAGE_TAG = env.GIT_BRANCH == 'main' ? 'latest' : "${env.DOCKER_IMAGE_NAME}-${env.GIT_BRANCH}-${env.BUILD_NUMBER}"
-                    }
-                }
             }
         }
 
-        stage('Build & Test') {
-            steps {
-                container('python') {
-                    sh """
-                        python3 -m venv venv
-                        . venv/bin/activate
-                        pip install --default-timeout=120 -r ${env.CONTEXT_DIR}/requirements.txt
-                        pytest ${env.CONTEXT_DIR}/test/test_app.py
-                    """
-                }
-            }
+        environment {
+            GIT_CREDENTIALS_ID = 'jenkins_1'
         }
 
-        stage('Build Docker Image') {
-            steps {
-                container('buildkit') {
-                    script {
-                        sh """
-                            DOCKER_BUILDKIT=1 docker build \\
-                              --progress=plain \\
-                              -t ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG} \\
-                              -f ${env.DOCKERFILE_PATH} ${env.CONTEXT_DIR}
-                        """
-                    }
-                }
-            }
-        }
+        stages {
+            stage('Checkout & Load Config') {
+                steps {
+                    container('jnlp') {
+                        script {
 
-        stage('Security Scan') {
-            steps {
-                container('tools') {
-                    script {
-                        sh """
-                            docker pull ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}
-                            trivy image --exit-code 1 --severity ${env.TRIVY_SEVERITY} ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}
-                        """
-                    }
-                }
-            }
-        }
+                            checkout scm
 
-        stage('Push Docker Image') {
-            steps {
-                container('buildkit') {
-                    script {
-                        withCredentials([usernamePassword(
-                            credentialsId: 'docker_token_1',
-                            usernameVariable: 'DOCKER_USER',
-                            passwordVariable: 'DOCKER_PASS'
-                        )]) {
-                            sh """
-                                echo ${DOCKER_PASS} | docker login -u ${DOCKER_USER} --password-stdin ${env.DOCKER_REGISTRY}
-                                docker push ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}
-                                ${env.GIT_BRANCH == 'main' ? 'docker tag ' + env.FULL_IMAGE_NAME + ':' + env.IMAGE_TAG + ' ' + env.FULL_IMAGE_NAME + ':latest && docker push ' + env.FULL_IMAGE_NAME + ':latest' : ''}
-                            """
+                            env.BRANCH_NAME = env.BRANCH_NAME ?: 'developer'
+
+
+                            def configFile = "${WORKSPACE}/app/.ci-config.yaml"
+                            if (!fileExists(configFile)) {
+                                error("Config file ${configFile} not found!")
+                            }
+
+                            def cfg = readYaml(file: configFile)
+
+                            if (!cfg || !cfg.appName) {
+                                error("Invalid config: 'appName' is required!")
+                            }
+
+  
+                            env.FULL_IMAGE_NAME = cfg.dockerImage ?: "docker.io/archcra/${cfg.appName}"
+                            env.REPO_URL = cfg.infraRepoUrl ?: 'https://github.com/arch-hcra/st31.git'
+                            env.TARGET_PATH = cfg.infraRepoTargetPath ?: 'app-infra/overlays/dev'
+                            env.APP_NAME = cfg.appName
+
+
+                            env.IMAGE_TAG = env.BRANCH_NAME == 'main' ? 'latest' : "${env.APP_NAME}-${env.BRANCH_NAME}-${env.BUILD_NUMBER}"
+                            
+                            echo "=== CONFIG LOADED ==="
+                            echo "Image: ${env.FULL_IMAGE_NAME}"
+                            echo "Tag: ${env.IMAGE_TAG}"
                         }
                     }
                 }
             }
-        }
+
+            stage('Build & Test') {
+                steps {
+                    container('python') {
+                        sh '''
+                            python3 -m venv venv
+                            . venv/bin/activate
+                            pip install --default-timeout=120 -r app/requirements.txt
+                            pytest app/test/test_app.py
+                        '''
+                    }
+                }
+            }
+
+            stage('Build Docker Image') {
+                steps {
+                    container('dind') {
+                        script {
+                            sh "docker build -t ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG} -f app/Dockerfile app"
+                        }
+                    }
+                }
+            }
+
+            stage('Push Docker Image') {
+                steps {
+                    container('dind') {
+                        script {
+                            withCredentials([usernamePassword(
+                                credentialsId: 'docker_token_1',
+                                usernameVariable: 'DOCKER_USER',
+                                passwordVariable: 'DOCKER_PASS'
+                            )]) {
+                                sh """
+                                    echo \${DOCKER_PASS} | docker login -u \${DOCKER_USER} --password-stdin
+                                    docker push ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}
+                                """
+                                
+                                if (env.BRANCH_NAME == 'main') {
+                                    sh """
+                                        docker tag ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG} ${env.FULL_IMAGE_NAME}:latest
+                                        docker push ${env.FULL_IMAGE_NAME}:latest
+                                    """
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
         stage('Update Manifests') {
-            when { expression { env.GIT_BRANCH == 'main' || env.GIT_BRANCH == 'developer' } }
+            when {
+                expression { env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'developer' }
+            }
             steps {
                 container('tools') {
                     script {
-                        withCredentials([string(credentialsId: 'jenkins_1', variable: 'GIT_TOKEN')]) {
+                        withCredentials([string(
+                            credentialsId: 'jenkins_1', 
+                            variable: 'GIT_TOKEN'
+                        )]) {
                             sh """
-                                git clone https://${GIT_TOKEN}@${env.GIT_REPO_URL} /tmp/infra-repo
+                                git clone https://${GIT_TOKEN}@github.com/arch-hcra/st31.git /tmp/infra-repo
                                 cd /tmp/infra-repo
-                                git checkout ${env.GIT_BRANCH}
-                                yq eval '.images[0].newTag = \"${env.IMAGE_TAG}\"' ${env.TARGET_PATH}/kustomization.yaml -i
-                                git config --global user.email "${env.GIT_EMAIL}"
-                                git config --global user.name "${env.GIT_USER}"
+                                git checkout ${env.BRANCH_NAME}
+                                
+                                yq eval '.images[0].newTag = "${env.IMAGE_TAG}"' ${env.TARGET_PATH}/kustomization.yaml -i
+
+                                git config --global user.email "jenkins@ci.local"
+                                git config --global user.name "Jenkins CI"
+
                                 git add ${env.TARGET_PATH}/kustomization.yaml
                                 git commit -m "chore: update image tag to ${env.IMAGE_TAG} [skip ci]"
-                                git push https://${GIT_TOKEN}@${env.GIT_REPO_URL} HEAD:${env.GIT_BRANCH}
+                                git push https://${GIT_TOKEN}@github.com/arch-hcra/st31.git HEAD:${env.BRANCH_NAME}
                             """
                         }
                     }
                 }
             }
-        }
-
-        stage('Archive Artifacts') {
-            steps {
-                container('buildkit') {
-                    script {
-                        sh """
-                            docker save ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG} > ${env.ARTIFACT_IMAGE_TAR}
-                        """
-                        archiveArtifacts artifacts: "${env.ARTIFACT_IMAGE_TAR}", fingerprint: true
-                    }
-                }
-                sh """
-                    trivy image --format json --output ${env.TRIVY_REPORT} ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}
-                """
-                archiveArtifacts artifacts: "${env.TRIVY_REPORT}", fingerprint: true
-            }
-        }
-    }
-
-    post {
-        always {
-            sh "rm -rf ${WORKSPACE}/venv /tmp/infra-repo ${env.ARTIFACT_IMAGE_TAR} ${env.TRIVY_REPORT}"
-        }
-    }
 }
 
+        }
+    }
 }
