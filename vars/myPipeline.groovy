@@ -144,35 +144,42 @@ spec:
                                 credentialsId: 'jenkins_1',
                                 variable: 'GIT_TOKEN'
                             )]) {
-                                sh """
-                                    git clone https://${GIT_TOKEN}@github.com/arch-hcra/st31.git /tmp/infra-repo
-                                    cd /tmp/infra-repo
-                                    git checkout ${env.BRANCH_NAME}
+                                // Используем `withEnv` для безопасной передачи переменных в sh
+                                withEnv(["PATH+EXTRA=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"]) {
+                                    sh """
+                                        set -eux  # Включаем отладочные выводы
 
-                                    # Сохраняем текущую версию файла
-                                    cp ${env.TARGET_PATH}/kustomization.yaml kustomization.bak
+                                        # Клонируем репозиторий (без интерполяции ${GIT_TOKEN})
+                                        git clone https://\${GIT_TOKEN}@github.com/arch-hcra/st31.git /tmp/infra-repo
+                                        cd /tmp/infra-repo
+                                        git checkout ${env.BRANCH_NAME}
 
-                                    # Применяем изменения
-                                    yq eval '.images[0].newTag = "\${env.IMAGE_TAG}"' \${env.TARGET_PATH}/kustomization.yaml -i
+                                        # Копируем файл (используем env.VAR напрямую)
+                                        cp ${env.TARGET_PATH}/kustomization.yaml kustomization.bak
 
-                                    # Проверяем, изменился ли файл (исправленный вариант)
-                                    if [ "\$(git diff --no-index kustomization.bak ${env.TARGET_PATH}/kustomization.yaml)" = "" ]; then
-                                        echo "No changes detected, skipping commit"
-                                        exit 0
-                                    fi
+                                        # Обновляем тег (исправлено: экранируем переменные)
+                                        yq eval '.images[0].newTag = "${env.IMAGE_TAG}"' ${env.TARGET_PATH}/kustomization.yaml -i
 
-                                    git config --global user.email "jenkins@ci.local"
-                                    git config --global user.name "Jenkins CI"
+                                        # Проверяем изменения (исправлено: используем env.VAR)
+                                        if [ "$(git diff --no-index kustomization.bak ${env.TARGET_PATH}/kustomization.yaml)" = "" ]; then
+                                            echo "No changes detected, skipping commit"
+                                            exit 0
+                                        fi
 
-                                    git add ${env.TARGET_PATH}/kustomization.yaml
-                                    git commit -m "chore: update image tag to ${env.IMAGE_TAG} [skip ci]"
-                                    git push https://${GIT_TOKEN}@github.com/arch-hcra/st31.git HEAD:${env.BRANCH_NAME}
-                                """
+                                        # Настраиваем git и коммитим
+                                        git config --global user.email "jenkins@ci.local"
+                                        git config --global user.name "Jenkins CI"
+                                        git add ${env.TARGET_PATH}/kustomization.yaml
+                                        git commit -m "chore: update image tag to ${env.IMAGE_TAG} [skip ci]"
+                                        git push https://\${GIT_TOKEN}@github.com/arch-hcra/st31.git HEAD:${env.BRANCH_NAME}
+                                    """
+                                }
                             }
                         }
                     }
                 }
-            }
+}
+
 
 
         }
