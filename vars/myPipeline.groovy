@@ -158,10 +158,10 @@ spec:
                                         cp ${env.TARGET_PATH}/kustomization.yaml kustomization.bak
 
                                         # Обновляем тег (исправлено: экранируем переменные)
-                                        yq eval '.images[0].newTag = "${env.IMAGE_TAG}"' ${env.TARGET_PATH}/kustomization.yaml -i
+                                        yq eval '.images[0].newTag = "\${env.IMAGE_TAG}"' ${env.TARGET_PATH}/kustomization.yaml -i
 
                                         # Проверяем изменения (исправлено: используем env.VAR)
-                                        if [ "$(git diff --no-index kustomization.bak ${env.TARGET_PATH}/kustomization.yaml)" = "" ]; then
+                                        if [ "\$(git diff --no-index kustomization.bak ${env.TARGET_PATH}/kustomization.yaml)" = "" ]; then
                                             echo "No changes detected, skipping commit"
                                             exit 0
                                         fi
