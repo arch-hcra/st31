@@ -133,35 +133,46 @@ spec:
                 }
             }
 
-        stage('Update Manifests') {
-            when {
-                expression { env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'developer' }
-            }
-            steps {
-                container('tools') {
-                    script {
-                        withCredentials([string(
-                            credentialsId: 'jenkins_1', 
-                            variable: 'GIT_TOKEN'
-                        )]) {
-                            sh """
-                                git clone https://${GIT_TOKEN}@github.com/arch-hcra/st31.git /tmp/infra-repo
-                                cd /tmp/infra-repo
-                                git checkout ${env.BRANCH_NAME}
-                                
-                                yq eval '.images[0].newTag = "${env.IMAGE_TAG}"' ${env.TARGET_PATH}/kustomization.yaml -i
+            stage('Update Manifests') {
+                when {
+                    expression {
+                        env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'developer'
+                        // Блокируем рекурсию через проверку коммита
+                        !env.CHANGE_COMMIT_MESSAGE.contains('[skip ci]')
+                    }
+                }
+                steps {
+                    container('tools') {
+                        script {
+                            withCredentials([string(credentialsId: 'jenkins_1', variable: 'GIT_TOKEN')]) {
+                                sh """
+                                    # Клонируем репо, обновляем.tag, но СРАВНИВАЕМ изменения
+                                    git clone https://\${GIT_TOKEN}@github.com/arch-hcra/st31.git /tmp/infra-repo
+                                    cd /tmp/infra-repo
+                                    git checkout \${env.BRANCH_NAME}
 
-                                git config --global user.email "jenkins@ci.local"
-                                git config --global user.name "Jenkins CI"
+                                    # Сохраняем текущую версию
+                                    cp ${env.TARGET_PATH}/kustomization.yaml kustomization.bak
 
-                                git add ${env.TARGET_PATH}/kustomization.yaml
-                                git commit -m "chore: update image tag to ${env.IMAGE_TAG} [skip ci]"
-                                git push https://${GIT_TOKEN}@github.com/arch-hcra/st31.git HEAD:${env.BRANCH_NAME}
-                            """
+                                    # Применяем изменения
+                                    yq eval '.images[0].newTag = "\${env.IMAGE_TAG}"' ${env.TARGET_PATH}/kustomization.yaml -i
+
+                                    # Проверяем, изменился ли файл
+                                    if [ "\`git diff --no-index kustomization.bak ${env.TARGET_PATH}/kustomization.yaml\`" = "" ]; then
+                                        echo "No changes detected, skipping commit"
+                                        exit 0
+                                    fi
+
+                                    git config --global user.email "jenkins@ci.local"
+                                    git config --global user.name "Jenkins CI"
+                                    git add ${env.TARGET_PATH}/kustomization.yaml
+                                    git commit -m "chore: update image tag to \${env.IMAGE_TAG} [skip ci]"
+                                    git push https://\${GIT_TOKEN}@github.com/arch-hcra/st31.git HEAD:\${env.BRANCH_NAME}
+                                """
+                            }
                         }
                     }
                 }
-            }
 }
 
         }
