@@ -147,22 +147,16 @@ spec:
                             sh """
                                 git clone https://${GIT_TOKEN}@github.com/arch-hcra/st31.git /tmp/infra-repo
                                 cd /tmp/infra-repo
-                                git checkout \${env.BRANCH_NAME}
+                                git checkout ${env.BRANCH_NAME}
                                 
-                                CURRENT_TAG=\$(yq eval '.images[0].newTag' \${env.TARGET_PATH}/kustomization.yaml 2>/dev/null || echo "")
+                                yq eval '.images[0].newTag = "${env.IMAGE_TAG}"' ${env.TARGET_PATH}/kustomization.yaml -i
 
-                                if [ "$CURRENT_TAG" != "\${env.IMAGE_TAG}" ]; then
-                                    echo "Тег в файле: \$CURRENT_TAG, ожидаемый: \$${env.IMAGE_TAG} → обновляем..."
-                                    yq eval '.images[0].newTag = "\${env.IMAGE_TAG}"' \${env.TARGET_PATH}/kustomization.yaml -i
-                                    git config --global user.email "jenkins@ci.local"
-                                    git config --global user.name "Jenkins CI"
-                                    git add \${env.TARGET_PATH}/kustomization.yaml
-                                    git commit -m "chore: update image tag to \${env.IMAGE_TAG}"
-                                    git push https://${GIT_TOKEN}@github.com/arch-hcra/st31.git HEAD:\${env.BRANCH_NAME}
-                                else
-                                    echo "Тег уже обновлён в файле, пуш отменён"
-                                    exit 0
-                                fi
+                                git config --global user.email "jenkins@ci.local"
+                                git config --global user.name "Jenkins CI"
+
+                                git add ${env.TARGET_PATH}/kustomization.yaml
+                                git commit -m "chore: update image tag to ${env.IMAGE_TAG} [skip ci]"
+                                git push https://${GIT_TOKEN}@github.com/arch-hcra/st31.git HEAD:${env.BRANCH_NAME} 
                             """
                         }
                     }
