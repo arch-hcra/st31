@@ -155,8 +155,8 @@ spec:
                                 git config --global user.name "Jenkins CI"
 
                                 git add ${env.TARGET_PATH}/kustomization.yaml
-                                git commit -m "chore: update image tag to ${env.IMAGE_TAG} [skip ci]"
-                                git push https://${GIT_TOKEN}@github.com/arch-hcra/st31.git HEAD:${env.BRANCH_NAME}
+                                git commit -m "chore: update image tag to ${env.IMAGE_TAG}"
+                                git push "https://${GIT_TOKEN}@github.com/arch-hcra/st31.git HEAD:${env.BRANCH_NAME} [skip ci]"
                             """
                         }
                     }
