@@ -14,7 +14,7 @@ spec:
   containers:
   - name: jnlp
     image: jenkins/inbound-agent:latest
-    args: ['\$(JENKINS_SECRET)', '\$(JENKINS_NAME)']
+    args: ['$(JENKINS_SECRET)', '$(JENKINS_NAME)']
 
   - name: dind
     image: docker:dind
@@ -42,51 +42,54 @@ spec:
         }
 
         environment {
-            // Среда
-            GIT_CREDENTIALS_ID = 'jenkins_1'
-            BRANCH_NAME = env.BRANCH_NAME ?: 'developer'
-
-            // Конфигурация из файла
+            // Основные переменные
+            DEFAULT_BRANCH = 'developer'
             CONFIG_FILE = "${WORKSPACE}/app/.ci-config.yaml"
+            ARTIFACT_DIR = "${WORKSPACE}/artifacts"
+            DOCKER_CREDENTIALS = 'docker_token_1'
+            GIT_TOKEN_CREDENTIALS = 'jenkins_1'
+
+            // Переменные из конфига
             APP_NAME = ''
             FULL_IMAGE_NAME = ''
             REPO_URL = 'https://github.com/arch-hcra/st31.git'
             TARGET_PATH = 'app-infra/overlays/dev'
-            IMAGE_TAG = ""
 
-            // Docker
-            DOCKER_REGISTRY = 'docker.io'
-            ARTIFACT_DIR = "${WORKSPACE}/artifacts"
+            // Переменные для логики
+            IS_MAIN_BRANCH = "${BRANCH_NAME} == 'main'"
+            IS_DEVELOP_BRANCH = "${BRANCH_NAME} == 'developer'"
+            SHOULD_UPDATE_MANIFESTS = "${IS_MAIN_BRANCH} || ${IS_DEVELOP_BRANCH}"
+            SHOULD_SCAN_SECURITY = "!${IS_MAIN_BRANCH}"
         }
 
         stages {
             stage('Prepare') {
                 steps {
-                    container('jnlp') {
-                        script {
-                            checkout scm
+                    script {
+                        checkout scm
 
-                            if (!fileExists(env.CONFIG_FILE)) {
-                                error("Config file ${env.CONFIG_FILE} not found!")
-                            }
-
-                            def cfg = readYaml(file: env.CONFIG_FILE)
-
-                            if (!cfg || !cfg.appName) {
-                                error("Invalid config: 'appName' is required!")
-                            }
-
-                            env.APP_NAME = cfg.appName
-                            env.FULL_IMAGE_NAME = cfg.dockerImage ?: "${env.DOCKER_REGISTRY}/archcra/${env.APP_NAME}"
-                            env.REPO_URL = cfg.infraRepoUrl ?: env.REPO_URL
-                            env.TARGET_PATH = cfg.infraRepoTargetPath ?: env.TARGET_PATH
-                            env.IMAGE_TAG = env.BRANCH_NAME == 'main' ? 'latest' : "${env.APP_NAME}-${env.BRANCH_NAME}-${env.BUILD_NUMBER}"
-
-                            mkdir env.ARTIFACT_DIR
-                            echo "=== CONFIG LOADED ==="
-                            echo "Image: ${env.FULL_IMAGE_NAME}"
-                            echo "Tag: ${env.IMAGE_TAG}"
+                        if (!fileExists(env.CONFIG_FILE)) {
+                            error("Config file ${env.CONFIG_FILE} not found!")
                         }
+
+                        def cfg = readYaml(file: env.CONFIG_FILE)
+                        if (!cfg || !cfg.appName) {
+                            error("Invalid config: 'appName' is required!")
+                        }
+
+                        env.APP_NAME = cfg.appName
+                        env.FULL_IMAGE_NAME = cfg.dockerImage ?: "docker.io/archcra/${env.APP_NAME}"
+                        env.REPO_URL = cfg.infraRepoUrl ?: env.REPO_URL
+                        env.TARGET_PATH = cfg.infraRepoTargetPath ?: env.TARGET_PATH
+                        env.IMAGE_TAG = env.BRANCH_NAME == 'main' ? 'latest' : "${env.APP_NAME}-${env.BRANCH_NAME}-${env.BUILD_NUMBER}"
+                        env.DOCKER_USER = ''
+                        env.DOCKER_PASS = ''
+                        env.GIT_TOKEN = ''
+
+                        mkdir env.ARTIFACT_DIR
+                        echo "=== CONFIG LOADED ==="
+                        echo "Image: ${env.FULL_IMAGE_NAME}"
+                        echo "Tag: ${env.IMAGE_TAG}"
                     }
                 }
             }
@@ -94,21 +97,21 @@ spec:
             stage('Build & Test') {
                 steps {
                     container('python') {
-                        script {
-                            sh '''
-                                python3 -m venv venv
-                                . venv/bin/activate
-                                pip install --default-timeout=120 -r app/requirements.txt
-                                pytest app/test/test_app.py
-                            '''
-                        }
+                        sh '''
+                            python3 -m venv venv
+                            . venv/bin/activate
+                            pip install --default-timeout=120 -r app/requirements.txt
+                            pytest app/test/test_app.py
+                        '''
                     }
                 }
             }
 
             stage('Security Scan') {
                 when {
-                    not { env.BRANCH_NAME == 'main' }
+                    expression {
+                        return ${env.SHOULD_SCAN_SECURITY}
+                    }
                 }
                 steps {
                     container('tools') {
@@ -137,7 +140,7 @@ spec:
                     container('dind') {
                         script {
                             withCredentials([usernamePassword(
-                                credentialsId: 'docker_token_1',
+                                credentialsId: env.DOCKER_CREDENTIALS,
                                 usernameVariable: 'DOCKER_USER',
                                 passwordVariable: 'DOCKER_PASS'
                             )]) {
@@ -146,7 +149,7 @@ spec:
                                     docker push ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}
                                 """
 
-                                if (env.BRANCH_NAME == 'main') {
+                                if (env.IS_MAIN_BRANCH) {
                                     sh """
                                         docker tag ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG} ${env.FULL_IMAGE_NAME}:latest
                                         docker push ${env.FULL_IMAGE_NAME}:latest
@@ -168,17 +171,19 @@ spec:
 
             stage('Update Manifests') {
                 when {
-                    expression { env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'developer' }
+                    expression {
+                        return ${env.SHOULD_UPDATE_MANIFESTS}
+                    }
                 }
                 steps {
                     container('tools') {
                         script {
                             withCredentials([string(
-                                credentialsId: 'jenkins_1',
+                                credentialsId: env.GIT_TOKEN_CREDENTIALS,
                                 variable: 'GIT_TOKEN'
                             )]) {
                                 sh """
-                                    git clone https://${GIT_TOKEN}@github.com/arch-hcra/st31.git /tmp/infra-repo
+                                    git clone https://\${GIT_TOKEN}@github.com/arch-hcra/st31.git /tmp/infra-repo
                                     cd /tmp/infra-repo
                                     git checkout ${env.BRANCH_NAME}
 
@@ -189,7 +194,7 @@ spec:
 
                                     git add ${env.TARGET_PATH}/kustomization.yaml
                                     git commit -m "chore: update image tag to ${env.IMAGE_TAG} [skip ci]"
-                                    git push https://${GIT_TOKEN}@github.com/arch-hcra/st31.git HEAD:${env.BRANCH_NAME}
+                                    git push https://\${GIT_TOKEN}@github.com/arch-hcra/st31.git HEAD:${env.BRANCH_NAME}
                                 """
                             }
                         }
