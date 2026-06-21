@@ -132,7 +132,7 @@ spec:
                     container('dind') {  // <-- Используем dind, а не trivy
                         script {
                             // Проверяем, что образ собран
-                            def imageCheck = sh(script: "docker images | grep ${env.FULL_IMAGE_NAME}", returnStdout: true)
+                            def imageCheck = sh(script: "docker images | grep ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}", returnStdout: true)
                             if (imageCheck.trim().contains(env.IMAGE_TAG)) {
                                 echo "Image found: ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}"
                             } else {
