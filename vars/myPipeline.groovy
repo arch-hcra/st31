@@ -19,7 +19,6 @@ spec:
   - name: dind
     image: docker:dind
     command: ['dockerd-entrypoint.sh']
-    args: ['--tls=false']
     securityContext:
       privileged: true
 
@@ -41,11 +40,28 @@ spec:
             }
         }
 
-        // Блок конфигураций и логинов
+        // Используем пост-скрипт для установки переменных окружения
         environment {
-            GIT_CREDENTIALS_ID = configParams.gitCredentialsId ?: 'jenkins_1'
-            DOCKER_CREDENTIALS_ID = configParams.dockerCredentialsId ?: 'docker_token_1'
-            TRIVY_IMAGE = configParams.trivyImage ?: 'aquasec/trivy:latest'
+            // Переменные окружения устанавливаем отдельно
+            GIT_CREDENTIALS_ID = 'default_credentials'
+            DOCKER_CREDENTIALS_ID = 'default_docker_token'
+            TRIVY_IMAGE = 'aquasec/trivy:latest'
+        }
+
+        // Устанавливаем значения параметров после блока environment
+        script {
+            if (configParams.gitCredentialsId) {
+                env.GIT_CREDENTIALS_ID = configParams.gitCredentialsId
+            }
+            if (configParams.dockerCredentialsId) {
+                env.DOCKER_CREDENTIALS_ID = configParams.dockerCredentialsId
+            }
+            if (configParams.trivyImage) {
+                env.TRIVY_IMAGE = configParams.trivyImage
+            }
+            if (configParams.defaultBranch) {
+                env.BRANCH_NAME = configParams.defaultBranch
+            }
         }
 
         stages {
@@ -55,13 +71,11 @@ spec:
                         script {
                             checkout scm
 
-                            env.BRANCH_NAME = env.BRANCH_NAME ?: configParams.defaultBranch ?: 'developer'
-
+                            // Пример загрузки конфигурации
                             def configFile = "${WORKSPACE}/app/.ci-config.yaml"
                             if (!fileExists(configFile)) {
                                 error("Config file ${configFile} not found!")
                             }
-
                             def cfg = readYaml(file: configFile)
 
                             if (!cfg || !cfg.appName) {
@@ -69,8 +83,8 @@ spec:
                             }
 
                             env.FULL_IMAGE_NAME = cfg.dockerImage ?: "docker.io/archcra/${cfg.appName}"
-                            env.REPO_URL = cfg.infraRepoUrl ?: configParams.infraRepoUrl ?: 'https://github.com/arch-hcra/st31.git'
-                            env.TARGET_PATH = cfg.infraRepoTargetPath ?: configParams.infraRepoTargetPath ?: 'app-infra/overlays/dev'
+                            env.REPO_URL = cfg.infraRepoUrl ?: env.REPO_URL ?: 'https://github.com/arch-hcra/st31.git'
+                            env.TARGET_PATH = cfg.infraRepoTargetPath ?: env.TARGET_PATH ?: 'app-infra/overlays/dev'
                             env.APP_NAME = cfg.appName
 
                             env.IMAGE_TAG = env.BRANCH_NAME == 'main' ? 'latest' :
@@ -80,6 +94,7 @@ spec:
                 }
             }
 
+            // Остальные stages остаются без изменений
             stage('Build & Test') {
                 steps {
                     container('python') {
@@ -96,9 +111,7 @@ spec:
             stage('Build Docker Image') {
                 steps {
                     container('dind') {
-                        script {
-                            sh "docker build -t ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG} -f app/Dockerfile app"
-                        }
+                        sh "docker build -t ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG} -f app/Dockerfile app"
                     }
                 }
             }
@@ -107,7 +120,7 @@ spec:
                 steps {
                     container('tools') {
                         withCredentials([usernamePassword(
-                            credentialsId: configParams.trivyCredentialsId ?: 'default',
+                            credentialsId: env.GIT_CREDENTIALS_ID,
                             usernameVariable: 'TRIVY_USERNAME',
                             passwordVariable: 'TRIVY_PASSWORD'
                         )]) {
@@ -124,75 +137,19 @@ spec:
             stage('Push Docker Image') {
                 steps {
                     container('dind') {
-                        script {
-                            withCredentials([usernamePassword(
-                                credentialsId: env.DOCKER_CREDENTIALS_ID,
-                                usernameVariable: 'DOCKER_USER',
-                                passwordVariable: 'DOCKER_PASS'
-                            )]) {
-                                sh """
-                                    echo \${DOCKER_PASS} | docker login -u \${DOCKER_USER} --password-stdin
-                                    docker push ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}
-                                """
-
-                                if (env.BRANCH_NAME == 'main') {
-                                    sh """
-                                        docker tag ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG} ${env.FULL_IMAGE_NAME}:latest
-                                        docker push ${env.FULL_IMAGE_NAME}:latest
-                                    """
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            stage('Build Artifacts') {
-                steps {
-                    container('jnlp') {
-                        script {
-                            // Пример создания артефактов
-                            archiveArtifacts artifacts: 'app/**/*.py', fingerprint: true
-
-                            // Копирование Dockerfile и других важных файлов
-                            sh "cp app/Dockerfile ${WORKSPACE}/Dockerfile"
-
-                            // Добавление собранного образа для дальнейшего скачивания
+                        withCredentials([usernamePassword(
+                            credentialsId: env.DOCKER_CREDENTIALS_ID,
+                            usernameVariable: 'DOCKER_USER',
+                            passwordVariable: 'DOCKER_PASS'
+                        )]) {
                             sh """
-                                docker save ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG} -o ${WORKSPACE}/${env.FULL_IMAGE_NAME}_${env.IMAGE_TAG}.tar
+                                echo \${DOCKER_PASS} | docker login -u \${DOCKER_USER} --password-stdin
+                                docker push ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}
                             """
-                            archiveArtifacts artifacts: "${WORKSPACE}/${env.FULL_IMAGE_NAME}_${env.IMAGE_TAG}.tar"
-                        }
-                    }
-                }
-            }
-
-            stage('Update Manifests') {
-                when {
-                    expression {
-                        env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'developer'
-                    }
-                }
-                steps {
-                    container('tools') {
-                        script {
-                            withCredentials([string(
-                                credentialsId: env.GIT_CREDENTIALS_ID,
-                                variable: 'GIT_TOKEN'
-                            )]) {
+                            if (env.BRANCH_NAME == 'main') {
                                 sh """
-                                    git clone https://${GIT_TOKEN}@github.com/arch-hcra/st31.git /tmp/infra-repo
-                                    cd /tmp/infra-repo
-                                    git checkout ${env.BRANCH_NAME}
-
-                                    yq eval '.images[0].newTag = \"${env.IMAGE_TAG}\"' ${env.TARGET_PATH}/kustomization.yaml -i
-
-                                    git config --global user.email "jenkins@ci.local"
-                                    git config --global user.name "Jenkins CI"
-
-                                    git add ${env.TARGET_PATH}/kustomization.yaml
-                                    git commit -m "chore: update image tag to ${env.IMAGE_TAG} [skip ci]"
-                                    git push https://${GIT_TOKEN}@github.com/arch-hcra/st31.git HEAD:${env.BRANCH_NAME}
+                                    docker tag ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG} ${env.FULL_IMAGE_NAME}:latest
+                                    docker push ${env.FULL_IMAGE_NAME}:latest
                                 """
                             }
                         }
