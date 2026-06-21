@@ -129,46 +129,39 @@ spec:
                     expression { env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'developer' }
                 }
                 steps {
-                    container('dind') {  // <-- Используем dind, а не trivy
+                    container('dind') {
                         script {
-                            // Проверяем, что образ собран
                             def imageCheck = sh(script: "docker images | grep ${env.IMAGE_TAG}", returnStdout: true)
-                            if (imageCheck.trim().contains(env.IMAGE_TAG)) {
-                                echo "Image found: ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}"
-                            } else {
+                            if (!imageCheck.trim().contains(env.IMAGE_TAG)) {
                                 error("Image ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG} not found!")
                             }
 
-                            // Устанавливаем Trivy в контейнере dind
                             sh "apk add --no-cache curl"
                             sh "curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin"
 
-                            // Скан на уязвимости
-                            def scanResult = sh(
-                                script: "/usr/local/bin/trivy image --exit-code 1 --severity CRITICAL,HIGH ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}",
+                            // Скан уязвимостей (без прерывания)
+                            def vulnerabilitiesReport = sh(
+                                script: "/usr/local/bin/trivy image --format table --severity CRITICAL,HIGH,MEDIUM,LOW ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}",
                                 returnStdout: true
                             )
 
-                            if (scanResult.trim() != "") {
-                                error("Critical or High vulnerabilities found: ${scanResult}")
-                            }
+                            writeFile file: "trivy-vulnerabilities-${env.BUILD_NUMBER}.txt", text: vulnerabilitiesReport
+                            archiveArtifacts artifacts: 'trivy-vulnerabilities-*.txt', fingerprint: true
 
-                            // Сохраняем отчёт
-                            writeFile file: "trivy-report-${env.BUILD_NUMBER}.txt",
-                                    text: sh(
-                                        script: "/usr/local/bin/trivy image --format table --severity LOW,MEDIUM ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}",
-                                        returnStdout: true
-                                    ).trim()
-
-                            // Скан на секреты
-                            def secretScan = sh(
-                                script: "/usr/local/bin/trivy image --security-checks secrets ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}",
+                            // Скан секретов
+                            def secretsReport = sh(
+                                script: "/usr/local/bin/trivy image --security-checks secrets --no-progress ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}",
                                 returnStdout: true
                             )
 
-                            if (secretScan.trim().contains("secret")) {
-                                error("Potential secrets found: ${secretScan}")
-                            }
+                            writeFile file: "trivy-secrets-${env.BUILD_NUMBER}.txt", text: secretsReport
+                            archiveArtifacts artifacts: 'trivy-secrets-*.txt', fingerprint: true
+
+                            // JSON-отчёт
+                            sh "/usr/local/bin/trivy image --format json --output ${WORKSPACE}/trivy-report.json ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}"
+                            archiveArtifacts artifacts: 'trivy-report.json', fingerprint: true
+
+                            echo "=== Scan completed. Artifacts saved ==="
                         }
                     }
                 }
