@@ -37,7 +37,13 @@ spec:
       apk add --no-cache curl git yq
       cat
     tty: true
+
+  - name: trivy
+    image: aquasec/trivy:latest
+    command: ['cat']
+    tty: true
 """
+
             }
         }
 
@@ -105,6 +111,44 @@ spec:
                     container('dind') {
                         script {
                             sh "docker build -t ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG} -f app/Dockerfile app"
+                        }
+                    }
+                }
+            }
+
+            stage('Scan Docker Image') {
+                when {
+                    expression { env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'developer' }
+                }
+                steps {
+                    container('trivy') {
+                        script {
+                            // Скан на уязвимости
+                            def scanResult = sh(
+                                script: "trivy image --exit-code 1 --severity CRITICAL,HIGH ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}",
+                                returnStdout: true
+                            )
+
+                            if (scanResult.trim() != "") {
+                                error("Critical or High vulnerabilities found in image: ${scanResult}")
+                            }
+
+                            // Сохраняем отчет в артефакты
+                            writeFile file: "trivy-report-${env.BUILD_NUMBER}.txt",
+                                      text: sh(
+                                          script: "trivy image --format table --severity LOW,MEDIUM ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}",
+                                          returnStdout: true
+                                      ).trim()
+
+                            // Скан на конфиденциальные данные
+                            def secretScan = sh(
+                                script: "trivy image --security-checks secrets ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}",
+                                returnStdout: true
+                            )
+
+                            if (secretScan.trim().contains("secret")) {
+                                error("Potential secrets found in image: ${secretScan}")
+                            }
                         }
                     }
                 }
