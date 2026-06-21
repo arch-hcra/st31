@@ -11,37 +11,45 @@ metadata:
     jenkins: agent
 spec:
   serviceAccountName: default
+  volumes:
+    - name: docker-sock
+      hostPath:
+        path: /var/run/docker.sock
   containers:
-  - name: jnlp
-    image: jenkins/inbound-agent:latest
-    args: ['\$(JENKINS_SECRET)', '\$(JENKINS_NAME)']
+    - name: jnlp
+      image: jenkins/inbound-agent:latest
+      args: ['\$(JENKINS_SECRET)', '\$(JENKINS_NAME)']
+      volumeMounts:
+        - name: docker-sock
+          mountPath: /var/run/docker.sock
 
-  - name: dind
-    image: docker:dind
-    command: ['dockerd-entrypoint.sh']
-    args: ['--tls=false']
-    securityContext:
-      privileged: true
+    - name: dind
+      image: docker:dind
+      command: ['dockerd-entrypoint.sh']
+      args: ['--tls=false']
+      securityContext:
+        privileged: true
 
-  - name: python
-    image: python:3.9
-    command: ['cat']
-    tty: true
+    - name: python
+      image: python:3.9
+      command: ['cat']
+      tty: true
 
-  - name: tools
-    image: alpine/kubectl:latest
-    command:
-    - /bin/sh
-    - -c
-    - |
-      apk add --no-cache curl git yq
-      cat
-    tty: true
+    - name: tools
+      image: alpine/kubectl:latest
+      command: ['/bin/sh', '-c', 'apk add --no-cache curl git yq && cat']
+      tty: true
+      volumeMounts:
+        - name: docker-sock
+          mountPath: /var/run/docker.sock
 
-  - name: trivy
-    image: aquasec/trivy:latest
-    command: ['cat']
-    tty: true
+    - name: trivy
+      image: aquasec/trivy:latest
+      command: ['cat']
+      tty: true
+      volumeMounts:
+        - name: docker-sock
+          mountPath: /var/run/docker.sock
 """
 
             }
