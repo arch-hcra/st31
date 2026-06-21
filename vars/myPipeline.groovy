@@ -121,38 +121,51 @@ spec:
                     expression { env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'developer' }
                 }
                 steps {
-                    container('trivy') {
+                    container('dind') {  // <-- Используем dind, а не trivy
                         script {
+                            // Проверяем, что образ собран
+                            def imageCheck = sh(script: "docker images | grep ${env.FULL_IMAGE_NAME}", returnStdout: true)
+                            if (imageCheck.trim().contains(env.IMAGE_TAG)) {
+                                echo "Image found: ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}"
+                            } else {
+                                error("Image ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG} not found!")
+                            }
+
+                            // Устанавливаем Trivy в контейнере dind
+                            sh "apk add --no-cache curl"
+                            sh "curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin"
+
                             // Скан на уязвимости
                             def scanResult = sh(
-                                script: "trivy image --exit-code 1 --severity CRITICAL,HIGH ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}",
+                                script: "/usr/local/bin/trivy image --exit-code 1 --severity CRITICAL,HIGH ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}",
                                 returnStdout: true
                             )
 
                             if (scanResult.trim() != "") {
-                                error("Critical or High vulnerabilities found in image: ${scanResult}")
+                                error("Critical or High vulnerabilities found: ${scanResult}")
                             }
 
-                            // Сохраняем отчет в артефакты
+                            // Сохраняем отчёт
                             writeFile file: "trivy-report-${env.BUILD_NUMBER}.txt",
-                                      text: sh(
-                                          script: "trivy image --format table --severity LOW,MEDIUM ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}",
-                                          returnStdout: true
-                                      ).trim()
+                                    text: sh(
+                                        script: "/usr/local/bin/trivy image --format table --severity LOW,MEDIUM ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}",
+                                        returnStdout: true
+                                    ).trim()
 
-                            // Скан на конфиденциальные данные
+                            // Скан на секреты
                             def secretScan = sh(
-                                script: "trivy image --security-checks secrets ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}",
+                                script: "/usr/local/bin/trivy image --security-checks secrets ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}",
                                 returnStdout: true
                             )
 
                             if (secretScan.trim().contains("secret")) {
-                                error("Potential secrets found in image: ${secretScan}")
+                                error("Potential secrets found: ${secretScan}")
                             }
                         }
                     }
                 }
             }
+
 
             stage('Push Docker Image') {
                 steps {
