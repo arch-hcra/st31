@@ -131,32 +131,45 @@ spec:
                 steps {
                     container('dind') {
                         script {
+                            // Проверка наличия образа
                             def imageCheck = sh(script: "docker images | grep ${env.IMAGE_TAG}", returnStdout: true)
                             if (!imageCheck.trim().contains(env.IMAGE_TAG)) {
                                 error("Image ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG} not found!")
                             }
 
+                            // Установка Trivy
                             sh "apk add --no-cache curl"
                             sh "curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin"
 
-                            // Скан уязвимостей (без прерывания)
+                            // --- Скан уязвимостей (без прерывания) ---
                             def vulnerabilitiesReport = sh(
-                                script: "/usr/local/bin/trivy image --format table --severity CRITICAL,HIGH,MEDIUM,LOW ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}",
+                                script: """
+                                    /usr/local/bin/trivy image \\
+                                        --format table \\
+                                        --severity CRITICAL,HIGH,MEDIUM,LOW \\
+                                        ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}
+                                """,
                                 returnStdout: true
                             )
 
+                            // Сохранение отчёта в текстовый файл
                             writeFile file: "trivy-vulnerabilities-${env.BUILD_NUMBER}.txt", text: vulnerabilitiesReport
+
+                            // Сохранение JSON-отчёта для интеграции с другими инструментами
+                            sh "/usr/local/bin/trivy image --format json --output ${WORKSPACE}/trivy-report-${env.BUILD_NUMBER}.json ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}"
+
+                            // Архивация артефактов
                             archiveArtifacts artifacts: 'trivy-vulnerabilities-*.txt', fingerprint: true
+                            archiveArtifacts artifacts: 'trivy-report-*.json', fingerprint: true
 
-                            // JSON-отчёт
-                            sh "/usr/local/bin/trivy image --format json --output ${WORKSPACE}/trivy-report.json ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}"
-                            archiveArtifacts artifacts: 'trivy-report.json', fingerprint: true
-
-                            echo "=== Scan completed. Artifacts saved ==="
+                            // Логирование результатов
+                            echo "=== Trivy Vulnerability Scan Results ==="
+                            echo vulnerabilitiesReport
                         }
                     }
                 }
             }
+
 
 
             stage('Push Docker Image') {
