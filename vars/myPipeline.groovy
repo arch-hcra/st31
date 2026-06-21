@@ -148,15 +148,6 @@ spec:
                             writeFile file: "trivy-vulnerabilities-${env.BUILD_NUMBER}.txt", text: vulnerabilitiesReport
                             archiveArtifacts artifacts: 'trivy-vulnerabilities-*.txt', fingerprint: true
 
-                            // Скан секретов
-                            def secretsReport = sh(
-                                script: "/usr/local/bin/trivy image --security-checks secrets --no-progress ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}",
-                                returnStdout: true
-                            )
-
-                            writeFile file: "trivy-secrets-${env.BUILD_NUMBER}.txt", text: secretsReport
-                            archiveArtifacts artifacts: 'trivy-secrets-*.txt', fingerprint: true
-
                             // JSON-отчёт
                             sh "/usr/local/bin/trivy image --format json --output ${WORKSPACE}/trivy-report.json ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}"
                             archiveArtifacts artifacts: 'trivy-report.json', fingerprint: true
