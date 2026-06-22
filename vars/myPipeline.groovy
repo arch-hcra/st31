@@ -11,33 +11,47 @@ metadata:
     jenkins: agent
 spec:
   serviceAccountName: default
+  volumes:
+    - name: docker-sock
+      hostPath:
+        path: /var/run/docker.sock
   containers:
-  - name: jnlp
-    image: jenkins/inbound-agent:latest
-    args: ['\$(JENKINS_SECRET)', '\$(JENKINS_NAME)']
+    - name: jnlp
+      image: jenkins/inbound-agent:latest
+      args: ['\$(JENKINS_SECRET)', '\$(JENKINS_NAME)']
+      volumeMounts:
+        - name: docker-sock
+          mountPath: /var/run/docker.sock
 
-  - name: dind
-    image: docker:dind
-    command: ['dockerd-entrypoint.sh']
-    args: ['--tls=false']
-    securityContext:
-      privileged: true
+    - name: dind
+      image: docker:dind
+      command: ['dockerd-entrypoint.sh']
+      args: ['--tls=false']
+      securityContext:
+        privileged: true
 
-  - name: python
-    image: python:3.9
-    command: ['cat']
-    tty: true
+    - name: python
+      image: python:3.9
+      command: ['cat']
+      tty: true
 
-  - name: tools
-    image: alpine/kubectl:latest
-    command:
-    - /bin/sh
-    - -c
-    - |
-      apk add --no-cache curl git yq
-      cat
-    tty: true
+    - name: tools
+      image: alpine/kubectl:latest
+      command: ['/bin/sh', '-c', 'apk add --no-cache curl git yq && cat']
+      tty: true
+      volumeMounts:
+        - name: docker-sock
+          mountPath: /var/run/docker.sock
+
+    - name: trivy
+      image: aquasec/trivy:latest
+      command: ['cat']
+      tty: true
+      volumeMounts:
+        - name: docker-sock
+          mountPath: /var/run/docker.sock
 """
+
             }
         }
 
@@ -109,6 +123,54 @@ spec:
                     }
                 }
             }
+
+            stage('Scan Docker Image') {
+                when {
+                    expression { env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'developer' }
+                }
+                steps {
+                    container('dind') {
+                        script {
+                            // Проверка наличия образа
+                            def imageCheck = sh(script: "docker images | grep ${env.IMAGE_TAG}", returnStdout: true)
+                            if (!imageCheck.trim().contains(env.IMAGE_TAG)) {
+                                error("Image ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG} not found!")
+                            }
+
+                            // Установка Trivy
+                            sh "apk add --no-cache curl"
+                            sh "curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin"
+
+                            // --- Скан уязвимостей (без прерывания) ---
+                            def vulnerabilitiesReport = sh(
+                                script: """
+                                    /usr/local/bin/trivy image \\
+                                        --format table \\
+                                        --severity CRITICAL,HIGH,MEDIUM,LOW \\
+                                        ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}
+                                """,
+                                returnStdout: true
+                            )
+
+                            // Сохранение отчёта в текстовый файл
+                            writeFile file: "trivy-vulnerabilities-${env.BUILD_NUMBER}.txt", text: vulnerabilitiesReport
+
+                            // Сохранение JSON-отчёта для интеграции с другими инструментами
+                            sh "/usr/local/bin/trivy image --format json --output ${WORKSPACE}/trivy-report-${env.BUILD_NUMBER}.json ${env.FULL_IMAGE_NAME}:${env.IMAGE_TAG}"
+
+                            // Архивация артефактов
+                            archiveArtifacts artifacts: 'trivy-vulnerabilities-*.txt', fingerprint: true
+                            archiveArtifacts artifacts: 'trivy-report-*.json', fingerprint: true
+
+                            // Логирование результатов
+                            echo "=== Trivy Vulnerability Scan Results ==="
+                            echo vulnerabilitiesReport
+                        }
+                    }
+                }
+            }
+
+
 
             stage('Push Docker Image') {
                 steps {
